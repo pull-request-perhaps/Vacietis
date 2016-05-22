@@ -7,6 +7,6 @@
   (pp        (make-hash-table))
   (typedefs  (make-hash-table))
   (structs   (make-hash-table))
-  (accessors (make-hash-table))
+  (accessors (make-hash-table :test #'equal))
   (enums     (make-hash-table))
   (var-types (make-hash-table)))

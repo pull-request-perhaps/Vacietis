@@ -38,7 +38,12 @@
              #.(or *compile-file-truename* *load-truename*)))
       (%load-c-file it *compiler-state*))))
 
+(defvar *libc-dir*
+  (asdf:system-relative-pathname :vacietis "libc/"))
+
 (defmacro libc-dir ()
+  *libc-dir*
+  #+nil
   (directory-namestring (or *load-truename* *compile-file-truename*)))
 
 (defmacro load-libc-file (file libc-dir)

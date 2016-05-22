@@ -468,7 +468,8 @@
 
 ;;; scanf
 
-(load-libc-file "scanf.c" #.(libc-dir))
+(ignore-errors ;; XXX
+  (load-libc-file "scanf.c" #.(libc-dir)))
 
 ;;; things that have no effect
 

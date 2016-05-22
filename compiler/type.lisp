@@ -36,6 +36,8 @@
                                             (type-size
                                              (array-type-element-type type))
                                             (array-type-dimensions type))
+                                     nil
+                                     #+nil
                                      (error
                                       "Array has no dimensions specified")))))
 

@@ -127,7 +127,8 @@
    :radix 16))
 
 (defun read-float (prefix separator)
-  (let ((*readtable* (find-readtable :common-lisp)))
+  (let ((*readtable* (find-readtable :common-lisp))
+        (*read-default-float-format* 'double-float))
     (read-from-string
      (format nil "~d~a~a" prefix separator
              (slurp-while (lambda (c) (find c "0123456789+-eE" :test #'char=)))))))
@@ -285,9 +286,10 @@
     (case pp-directive
       (vacietis.c:define
        (setf (lookup-define)
-             (if (eql #\( (peek-char t %in))
+             (if (and nil (eql #\( (peek-char t %in))) ;;; XXX broken
                  (let ((args     (c-read-delimited-strings t))
                        (template (string-trim '(#\Space #\Tab) (pp-read-line))))
+                   ;;(format t "read left paren...~%")
                    (lambda (substitutions)
                      (if args
                          (fill-in-template args template substitutions)
@@ -364,6 +366,27 @@
   (or (type-size x)
       (type-size (gethash x (or *local-var-types*
                                 (compiler-state-var-types *compiler-state*))))))
+
+(defun ctype-of (x)
+  (or (when *local-var-types*
+        (gethash x *local-var-types*))
+      (gethash x (compiler-state-var-types *compiler-state*))))
+
+(defun ctype-of-exp (exp)
+  ;;(maphash #'(lambda (k v) (format t "  ~S: ~S~%" k v)) *local-var-types*)
+  ;;(maphash #'(lambda (k v) (format t "  ~S: ~S~%" k v)) (compiler-state-var-types *compiler-state*))
+  (let ((type
+         (if (listp exp)
+             (cond
+               ((eq 'vacietis.c:[] (car exp))
+                (let ((type (ctype-of-exp (cadr exp))))
+                  ;;(format t "c-type of ~S: ~S~%" (cadr exp) type)
+                  (when type
+                    ;; should be array-type
+                    (array-type-element-type type)))))
+             (ctype-of exp))))
+    ;;(format t "c-type of ~S: ~S~%" exp type)
+    type))
 
 ;;; infix
 
@@ -456,13 +479,14 @@
                (cond
                  ((find x #(vacietis.c:|.| vacietis.c:->))
                   (let ((exp (parse-binary i)))
-                    (return-from parse-infix
-                      `(vacietis.c:|.|
-                        ,(if (eq x 'vacietis.c:->)
-                             `(vacietis.c:deref* ,(elt exp 1))
-                             (elt exp 1))
-                        ,(gethash (elt exp 2)
-                                  (compiler-state-accessors *compiler-state*))))))
+                    (let ((ctype (ctype-of-exp (elt exp 1))))
+                      (return-from parse-infix
+                        `(vacietis.c:|.|
+                                     ,(if (eq x 'vacietis.c:->)
+                                          `(vacietis.c:deref* ,(elt exp 1))
+                                          (elt exp 1))
+                                     ,(gethash (format nil "~A.~A" (slot-value ctype 'name) (elt exp 2))
+                                               (compiler-state-accessors *compiler-state*)))))))
                  ((listp x) ;; aref
                   (return-from parse-infix
                     (if (eq (car x) 'vacietis.c:[])
@@ -504,7 +528,9 @@
   (let ((exps (make-buffer)))
     (loop for c = (next-char)
           until (funcall predicate c)
-          do (vector-push-extend (read-c-exp c) exps))
+       do (progn
+            ;;(format t "read c: ~S~%" c)
+            (vector-push-extend (read-c-exp c) exps)))
     exps))
 
 (defun c-read-delimited-list (open-delimiter separator)
@@ -606,11 +632,13 @@
                        (progn (push '&rest            arglist)
                               (push 'vacietis.c:|...| arglist)
                               (return-from done-arglist)))
+                      ((eq x t)
+                       (push '__c_t arglist))
                       ((not (or (c-type? x) (eq 'vacietis.c:* x)))
                        (strip-type x))))))))
     (if (eql (peek-char nil %in) #\;)
         (prog1 t (c-read-char)) ;; forward declaration
-        `(defun/1 ,name ,(reverse arglist)
+        `(cepler::my-defun/1 ,name ,(reverse arglist)
            ,(let* ((*variable-declarations* ())
                    (*local-var-types*       (make-hash-table))
                    (body                    (read-c-block (next-char))))
@@ -670,7 +698,7 @@
                       (when initial-value
                         (push `(vacietis.c:= ,name ,initial-value)
                               decl-code)))
-               (push `(defparameter ,name
+               (push `(defparameter ,(intern (string-upcase name))
                         ,(or initial-value
                              (preallocated-value-exp-for type)))
                      decl-code))))
@@ -745,11 +773,15 @@
              (let ((base-type (read-base-type (read-c-exp c))))
                (process-variable-declaration (read-infix-exp (next-exp))
                                              base-type))
-           (setf (gethash slot-name
+           (setf (gethash (format nil "~A.~A" (slot-value struct-type 'name) slot-name)
                           (compiler-state-accessors *compiler-state*))
                  i
                  (struct-type-slots struct-type)
                  (append (struct-type-slots struct-type) (list slot-type)))
+           ;;(format t "struct-type: ~S slot-name ~A i: ~D~%" struct-type slot-name i)
+           ;; use a vector
+           (incf i)
+           #+nil
            (incf i (size-of slot-type))))))
 
 (defun read-struct (struct-type)
@@ -818,7 +850,11 @@
                         ((every #'lower-case-p raw-name-alphas) "~:@(~A~)")
                         (t "~A"))
                   raw-name)))
-    (or (find-symbol identifier-name '#:vacietis.c) (intern identifier-name))))
+    ;;(format t "identifier-name: ~S~%" identifier-name)
+    (or (find-symbol identifier-name '#:vacietis.c)
+        ;;(intern identifier-name)
+        (intern (string-upcase identifier-name))
+        )))
 
 (defun match-longest-op (one)
   (flet ((seq-match (&rest chars)
@@ -849,8 +885,12 @@
       (cond ((digit-char-p c) (read-c-number c))
             ((or (eql c #\_) (alpha-char-p c))
              (let ((symbol (read-c-identifier c)))
+               ;;(format t "~S -> symbol: ~S~%" c symbol)
+               (when (eq t symbol)
+                 (setq symbol '__c_t))
                (acond
                  ((gethash symbol (compiler-state-pp *compiler-state*))
+                  ;;(describe it)
                   (setf *macro-stream*
                         (make-string-input-stream
                          (etypecase it
@@ -860,8 +900,10 @@
                             (funcall it (c-read-delimited-strings)))))
                         %in
                         (make-concatenated-stream *macro-stream* %in))
+                  ;;(format t "read-c-exp...~%")
                   (read-c-exp (next-char)))
                  ((gethash symbol (compiler-state-enums *compiler-state*))
+                  ;;(format t "returning it...~%")
                   it)
                  (t
                   symbol))))
@@ -879,6 +921,7 @@
 (defun read-c-toplevel (%in c)
   (let* ((*macro-stream* nil)
          (exp1           (read-c-statement c)))
+    (format t "toplevel: ~S~%" exp1)
     (if (and *macro-stream* (peek-char t *macro-stream* nil))
         (list* 'progn
                exp1

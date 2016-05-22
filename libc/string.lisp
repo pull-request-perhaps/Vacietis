@@ -4,4 +4,5 @@
 (defun/1 strerror (errnum)
   (aref vacietis.libc.errno.h::errno-strings errnum))
 
-(load-libc-file "string.c" #.(libc-dir))
+(ignore-errors ;; XXX
+  (load-libc-file "string.c" #.(libc-dir)))
