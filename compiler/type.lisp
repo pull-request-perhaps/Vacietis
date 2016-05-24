@@ -43,6 +43,72 @@
 
 (defun preallocated-value-exp-for (type)
   (cond
-    ((struct-type-p type)  `(make-array ,(size-of type) :initial-element 0))
-    ((array-type-p type)   `(allocate-memory ,(size-of type)))
+    ((struct-type-p type)  `(make-array ,(length (struct-type-slots type))
+                                        (or nil ,@(mapcar #'lisp-type-for (struct-type-slots type)))
+                                        :initial-element nil))
+    ((array-type-p type)   `(make-array ,(size-of type)
+                                        :element-type ',(lisp-type-for (array-type-element-type type))))
+    ((eq type 'vacietis.c:double) 0.0d0)
+    ((eq type 'vacietis.c:float)  0.0e0)
     (t                     0)))
+
+(defun %lisp-type-for-array-type (type &optional dimensions)
+  (let ((element-type (array-type-element-type type))
+        (type-dimensions (array-type-dimensions type)))
+      (if (array-type-p element-type)
+          (%lisp-type-for-array-type element-type (append dimensions type-dimensions))
+          (throw :found-type (list 'simple-array (lisp-type-for element-type) (append dimensions type-dimensions))))))
+
+(defun lisp-type-for-array-type (type &optional dimensions)
+  (catch :found-type
+    (%lisp-type-for-array-type type dimensions)))
+
+
+;;#S(vacietis::array-type
+;;                :element-type #S(vacietis::struct-type
+;;                                 :name planet_pert
+;;                                 :slots (#S(vacietis::array-type
+;;                                            :element-type vacietis.c:double
+;;                                            :dimensions (11))
+;;                                         vacietis.c:double vacietis.c:double
+;;                                         vacietis.c:double))
+;;                :dimensions (14328))
+
+(defun lisp-type-for (type)
+  ;;(dbg "lisp-type-for type: ~S~%" type)
+  (cond
+    ((struct-type-p type)
+     `(simple-array (or ,@(mapcar #'lisp-type-for (struct-type-slots type)))
+                    (,(length (struct-type-slots type)))))
+    ((array-type-p type)
+     (lisp-type-for-array-type type))
+    ((eq type 'vacietis.c:double) 'double-float)
+    ((eq type 'vacietis.c:float)  'single-float)
+    ((eq type 'vacietis.c:long)   '(signed-byte 64))
+    ((eq type 'vacietis.c:int)    '(signed-byte 32))
+    ((eq type 'vacietis.c:short)  '(signed-byte 16))
+    ((eq type 'vacietis.c:char)   '(signed-byte 8))
+    (t t)))
+
+(defun lisp-type-declaration-for (type &optional name)
+  (if name
+      (let ((lisp-type (lisp-type-for type)))
+        (unless (eq t lisp-type)
+          `(type ,lisp-type ,name)))
+      (when (vectorp type)
+        (let* ((length (length type))
+               (name (aref type (1- length))))
+          (if (= length 2)
+              (lisp-type-declaration-for (aref type 0) name)
+              (when (eq (aref type 1) 'vacietis.c:*)
+                `(type (simple-array ,(lisp-type-for (aref type 0)) ,(make-list (- length 2) :initial-element '*)) ,name)))))))
+
+(defun lisp-constant-value-for (type constant)
+  (cond
+    ((eq type 'vacietis.c:double) (coerce constant 'double-float))
+    ((eq type 'vacietis.c:float)  (coerce constant 'single-float))
+    ((eq type 'vacietis.c:long)   (the (signed-byte 64) constant))
+    ((eq type 'vacietis.c:int)    (the (signed-byte 32) constant))
+    ((eq type 'vacietis.c:short)  (the (signed-byte 16) constant))
+    ((eq type 'vacietis.c:char)   (the (signed-byte 8)  constant))
+    (t constant)))

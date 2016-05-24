@@ -16,7 +16,8 @@
              (:file "implementation")
              (:file "libc-support")
              (:file "type")
-             (:file "reader")))
+             (:file "reader")
+             (:file "vac" :depends-on ("reader"))))
    (:module :libc
             :serial t
             :components
