@@ -1,7 +1,9 @@
 (in-package #:vacietis)
 
+(defparameter *debug* nil)
 (defmacro dbg (&rest rest)
-  `(format t ,@rest))
+  `(when *debug*
+     (format t ,@rest)))
 
 (in-readtable vacietis)
 
@@ -779,7 +781,6 @@
 
 (defvar *is-extern*)
 (defvar *is-const*)
-(defparameter *use-defconstant* nil)
 
 (defun read-variable-declarations (spec-so-far base-type)
   (let* ((*variable-declarations-base-type* base-type)
@@ -805,9 +806,7 @@
                               decl-code)))
                (unless *is-extern*
                  (dbg "global type: ~S~%" type)
-                 (let* ((defop (if (and *is-const* *use-defconstant*)
-                                   'defconstant
-                                   'defparameter))
+                 (let* ((defop 'defparameter)
                         (varname (intern (string-upcase name)))
                         (varvalue (or initial-value
                                       (preallocated-value-exp-for type)))
@@ -815,12 +814,10 @@
                    (dbg "declamation: ~S~%" declamation)
                    (push declamation
                          decl-code)
-                   (push `(,defop xxx
-                            ,varvalue)
-                         decl-code)
                    (push `(,defop ,varname
                             ,varvalue)
                          decl-code)
+                   #+nil
                    (push declamation
                          decl-code))))))
     (if decl-code
