@@ -55,6 +55,20 @@
 
 ;;; error reporting
 
+;; sbcl bug?
+#+sbcl
+(in-package :sb-c)
+#+sbcl
+(defun find-source-root (index info)
+  (declare (type index index) (type source-info info))
+  (let ((file-info (source-info-file-info info)))
+    (handler-case
+        (values (aref (file-info-forms file-info) index)
+                (aref (file-info-positions file-info) index))
+      (sb-int:invalid-array-index-error ()
+        (format t "invalid array index: ~S  file-info: ~S~%" index file-info)))))
+(in-package :vacietis)
+
 (define-condition c-reader-error (reader-error) ;; SBCL hates simple-conditions?
   ((c-file      :reader c-file      :initform *c-file*)
    (line-number :reader line-number :initform *line-number*)
@@ -297,7 +311,7 @@
     (case pp-directive
       (vacietis.c:define
        (setf (lookup-define)
-             (if (and nil (eql #\( (peek-char t %in))) ;;; XXX broken
+             (if (eql #\( (peek-char nil %in)) ;; no space between identifier and left paren
                  (let ((args     (c-read-delimited-strings t))
                        (template (string-trim '(#\Space #\Tab) (pp-read-line))))
                    ;;(dbg "read left paren...~%")
@@ -404,6 +418,7 @@
 (defvar *variable-declarations-base-type*)
 
 (defun parse-infix (exp &optional (start 0) (end (when (vectorp exp) (length exp))))
+  ;;(dbg "parse-infix: ~S ~S ~S~%" exp start end)
   (if (vectorp exp)
       (block nil
         (when (= 0 (length exp))
@@ -411,21 +426,29 @@
         (when (= 1 (- end start))
           (return (parse-infix (aref exp start))))
         (labels ((cast? (x)
-                   (and (vectorp x) (some #'c-type? x)))
+                   (and (vectorp x)
+                        (not (find 'vacietis.c:|,| x)) ;;; casts can't contain commas, can they?
+                        (some #'c-type? x)))
                  (match-binary-ops (table &key (lassoc t))
-                   (position-if (lambda (x) (find x table))
-                                exp :start (1+ start) :end (1- end)
-                                :from-end lassoc))
+                   ;;(dbg "match-binary-ops: ~S   ~S ~S~%" table (1+ start) (1- end))
+                   (let ((search-start (1+ start))
+                         (search-end (1- end)))
+                     (when (<= search-start search-end)
+                       (position-if (lambda (x)
+                                      (find x table))
+                                    exp :start (1+ start) :end (1- end)
+                                    :from-end lassoc))))
                  (parse-binary (i &optional op)
-                   (let ((varname (parse-infix exp start  i))
-                         (rvalue (parse-infix exp (1+ i) end)))
-                     ;;(dbg "~S assignment rvalue: ~S~%" varname rvalue)
+                   ;;(dbg "parse-binary: i: ~S  op: ~S  end: ~S~%" i op end)
+                   (let* ((lvalue (parse-infix exp start i))
+                          (rvalue (parse-infix exp (1+ i) end)))
+                     ;;(dbg "~S assignment rvalue: ~S~%" lvalue rvalue)
                      (list (or op (aref exp i))
-                           varname
+                           lvalue
                            (if (and (constantp rvalue) (numberp rvalue))
                                (let ((c-type (if (boundp '*variable-declarations-base-type*)
                                                  *variable-declarations-base-type*
-                                                 (c-type-of varname))))
+                                                 (c-type-of lvalue))))
                                  ;;(dbg "  -> type is: ~S~%" c-type)
                                  (lisp-constant-value-for c-type rvalue))
                                rvalue)))))
@@ -449,6 +472,7 @@
           ;; various binary operators
           (loop for table across *binary-ops-table* do
                (awhen (match-binary-ops table)
+                 ;;(dbg "matched binary op: ~S~%" it)
                  (if (and (find (elt exp it) *ambiguous-ops*)
                           (let ((prev (elt exp (1- it))))
                             (or (find prev *ops*) (cast? prev))))
@@ -463,9 +487,11 @@
                      (return-from parse-infix (parse-binary it)))))
           ;; unary operators
           (flet ((parse-rest (i)
+                   ;;(dbg "parse-rest: i: ~S  end: ~S~%" i end)
                    (parse-infix exp (1+ i) end)))
             (loop for i from start below end for x = (aref exp i) do
                  (cond ((cast? x)                               ;; cast
+                        ;;(dbg "cast: x: ~S~%" x)
                         (return-from parse-infix (parse-rest i)))
                        ((find x #(vacietis.c:++ vacietis.c:--)) ;; inc/dec
                         (return-from parse-infix
@@ -483,6 +509,7 @@
                                 `(prog1 ,place ,set-exp)
                                 set-exp))))
                        ((find x *possible-prefix-ops*)          ;; prefix op
+                        ;;(dbg "prefix op: ~S  i: ~S~%" x i)
                         (return-from parse-infix
                           (if (eq x 'vacietis.c:sizeof)
                               (let ((type-exp (aref exp (1+ i))))
@@ -591,7 +618,7 @@
                                ,(when (eq next-token 'vacietis.c:else)
                                       (read-block-or-statement))
                                ,then)))
-          (dbg "if-exp: ~S~%" if-exp)
+          ;;(dbg "if-exp: ~S~%" if-exp)
           (if (or (not next-token) (eq next-token 'vacietis.c:else))
               if-exp
               `(progn ,if-exp ,(%read-c-statement next-token))))
@@ -674,7 +701,7 @@
     (if (eql (peek-char nil %in) #\;)
         (prog1 t (c-read-char)) ;; forward declaration
         `(vac-defun/1 ,name ,(reverse arglist)
-           (declare ,@arglist-type-declarations)
+           (declare ,@(remove-if #'null arglist-type-declarations))
            ,(let* ((*variable-declarations* ())
                    (*variable-lisp-type-declarations* ())
                    (*local-var-types*       (make-hash-table))
