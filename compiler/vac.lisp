@@ -29,7 +29,7 @@
   `',(sb-cltl2:macroexpand-all form env))
 
 (defun make-aref (array-var index-var &optional indexen)
-  (dbg "make-aref: ~S ~S~%" array-var index-var)
+  ;;(dbg "make-aref: ~S ~S~%" array-var index-var)
   (if (and (listp array-var) (eq (first array-var) 'vacietis.c:[]))
       (make-aref (second array-var) (third array-var) (append indexen (list index-var)))
       (list* 'aref array-var (nreverse (append indexen (list index-var))))))
@@ -47,6 +47,8 @@
                   `(sb-c::sbcl%fast-truncl ,x))
                 (vacietis.c:ceil (x)
                   `(ceiling ,x))
+                (vacietis.c:! (a)
+                  `(not ,a))
                 (vacietis.c:&& (a b)
                   `(and ,a ,b))
                 (vacietis.c:|\|\|| (a b)
@@ -79,13 +81,14 @@
                                   test
                                   step)
                                  &body body)
-                  (declare (ignore variable-declarations))
+                  ;;(declare (ignore variable-declarations))
+                  (dbg ".c:for...: ~S~%" (list variable-declarations initializations test step))
                   `(progn
                      ,initializations
                      (loop while ,test
-                        do 
+                        do
                           ,@body
-                          ,step))))
+                          ,@(when step (list step))))))
        (dbg "~A ~S~%~S~%~S~%~S~%" ',name ',arglist
             ',declarations
             (macroexpansion-of ,@body)
