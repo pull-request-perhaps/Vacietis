@@ -41,11 +41,18 @@
                                      (error
                                       "Array has no dimensions specified")))))
 
+(defun unique-element-type-list (type)
+  (let ((list (remove-duplicates (mapcar #'lisp-type-for (struct-type-slots type))
+                                 :test #'equal)))
+    (if (= 1 (length list))
+        (car list)
+        `(or ,@list))))
+  
 (defun preallocated-value-exp-for (type)
   (cond
     ((struct-type-p type)  `(make-array ,(length (struct-type-slots type))
-                                        (or nil ,@(mapcar #'lisp-type-for (struct-type-slots type)))
-                                        :initial-element nil))
+                                        :element-type ',(unique-element-type-list type)
+                                        :initial-contents (list ,@(mapcar #'preallocated-value-exp-for (struct-type-slots type)))))
     ((array-type-p type)   `(make-array ,(size-of type)
                                         :element-type ',(lisp-type-for (array-type-element-type type))))
     ((eq type 'vacietis.c:double) 0.0d0)
@@ -78,7 +85,9 @@
   ;;(dbg "lisp-type-for type: ~S~%" type)
   (cond
     ((struct-type-p type)
-     `(simple-array (or ,@(mapcar #'lisp-type-for (struct-type-slots type)))
+     `(simple-array ,(unique-element-type-list type)
+                    #+nil (or ,@(remove-duplicates (mapcar #'lisp-type-for (struct-type-slots type))
+                                             :test #'equal))
                     (,(length (struct-type-slots type)))))
     ((array-type-p type)
      (lisp-type-for-array-type type))

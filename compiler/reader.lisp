@@ -1,10 +1,5 @@
 (in-package #:vacietis)
 
-(defparameter *debug* nil)
-(defmacro dbg (&rest rest)
-  `(when *debug*
-     (format t ,@rest)))
-
 (in-readtable vacietis)
 
 ;;(declaim (optimize (debug 3)))
@@ -17,6 +12,7 @@
 
 (cl:defparameter vacietis::*ops*
   #(= += -= *= /= %= <<= >>= &= ^= |\|=| ? |:| |\|\|| && |\|| ^ & == != < > <= >= << >> ++ -- + - * / % ! ~ -> |.| |,|
+    integer/
     truncl ceil))
 
 (cl:defparameter vacietis::*possible-prefix-ops*
@@ -26,7 +22,8 @@
   #(- + & *))
 
 (cl:defparameter vacietis::*assignment-ops*
-  #(= += -= *= /= %= <<= >>= &= ^= |\|=|))
+  #(= += -= *= /= %= <<= >>= &= ^= |\|=|
+    integer/=))
 
 (cl:defparameter vacietis::*binary-ops-table*
   #((|\|\||)                            ; or
@@ -394,6 +391,8 @@
 
 (defun c-type-of (x)
   (or (when *local-var-types*
+        (dbg "c-type-of ~S~%" x)
+        (maphash #'(lambda (k v) (dbg "  ~S: ~S~%" k v)) *local-var-types*)
         (gethash x *local-var-types*))
       (gethash x (compiler-state-var-types *compiler-state*))))
 
@@ -403,15 +402,30 @@
   (let ((type
          (if (listp exp)
              (cond
+               ((eq 'vacietis.c:deref* (car exp))
+                (c-type-of (cadr exp)))
+               ((eq 'vacietis.c:% (car exp))
+                ;; XXX assume int
+                'vacietis.c:int)
                ((eq 'vacietis.c:[] (car exp))
                 (let ((type (c-type-of-exp (cadr exp))))
                   ;;(dbg "c-type of ~S: ~S~%" (cadr exp) type)
                   (when type
                     ;; should be array-type
-                    (array-type-element-type type)))))
+                    (when (array-type-p type)
+                      (array-type-element-type type))))))
              (c-type-of exp))))
     ;;(dbg "c-type of ~S: ~S~%" exp type)
     type))
+
+(defun struct-name-of-type (type)
+  (cond
+    ((pointer-to-p type)
+     (struct-name-of-type (pointer-to-type type)))
+    ((struct-type-p type)
+     (struct-type-name type))
+    (t
+     nil)))
 
 ;;; infix
 
@@ -442,16 +456,30 @@
                    ;;(dbg "parse-binary: i: ~S  op: ~S  end: ~S~%" i op end)
                    (let* ((lvalue (parse-infix exp start i))
                           (rvalue (parse-infix exp (1+ i) end)))
-                     ;;(dbg "~S assignment rvalue: ~S~%" lvalue rvalue)
-                     (list (or op (aref exp i))
-                           lvalue
-                           (if (and (constantp rvalue) (numberp rvalue))
-                               (let ((c-type (if (boundp '*variable-declarations-base-type*)
-                                                 *variable-declarations-base-type*
-                                                 (c-type-of lvalue))))
-                                 ;;(dbg "  -> type is: ~S~%" c-type)
-                                 (lisp-constant-value-for c-type rvalue))
-                               rvalue)))))
+                     (dbg "binary-op ~S ~S ~S~%" (or op (aref exp i)) lvalue rvalue)
+                     (let ((c-type (if (boundp '*variable-declarations-base-type*)
+                                       *variable-declarations-base-type*
+                                       (c-type-of-exp lvalue))))
+                       (dbg "  -> type is: ~S~%" c-type)
+                       (list (let ((op (or op (aref exp i))))
+                               (cond
+                                 ((member c-type '(vacietis.c:long vacietis.c:int vacietis.c:short vacietis.c:char))
+                                  (case op
+                                    ('vacietis.c:/ 'vacietis.c:integer/)
+                                    ('vacietis.c:/= 'vacietis.c:integer/=)
+                                    (t op)))
+                                 ((and (pointer-to-p c-type)
+                                       (or (not (listp lvalue))
+                                           (not (eq 'vacietis.c:deref* (car lvalue)))))
+                                  (case op
+                                    ('vacietis.c:+ 'vacietis.c:ptr+)
+                                    ('vacietis.c:+= 'vacietis.c:ptr+=)
+                                    (t op)))
+                                 (t op)))
+                             lvalue
+                             (if (and (constantp rvalue) (numberp rvalue))
+                                 (lisp-constant-value-for c-type rvalue)
+                                 rvalue))))))
           ;; in order of weakest to strongest precedence
           ;; comma
           (awhen (match-binary-ops '(vacietis.c:|,|))
@@ -463,7 +491,7 @@
           (awhen (position 'vacietis.c:? exp :start start :end end)
             (let ((?pos it))
               (return
-                `(if (not (eql 0 ,(parse-infix exp start ?pos)))
+                `(if ,(parse-infix exp start ?pos)
                      ,@(aif (position 'vacietis.c:|:| exp :start ?pos :end end)
                             (list (parse-infix exp (1+ ?pos) it)
                                   (parse-infix exp (1+ it)   end))
@@ -534,7 +562,7 @@
                                      ,(if (eq x 'vacietis.c:->)
                                           `(vacietis.c:deref* ,(elt exp 1))
                                           (elt exp 1))
-                                     ,(gethash (format nil "~A.~A" (slot-value ctype 'name) (elt exp 2))
+                                     ,(gethash (format nil "~A.~A" (struct-name-of-type ctype) (elt exp 2))
                                                (compiler-state-accessors *compiler-state*)))))))
                  ((listp x) ;; aref
                   (return-from parse-infix
@@ -599,6 +627,7 @@
   (flet ((read-block-or-statement ()
            (let ((next-char (next-char)))
              (if (eql next-char #\{)
+                 ;;#+nil ;; XXX check if tagbody exists
                  (cons 'tagbody (read-c-block next-char))
                  (read-c-statement next-char)))))
     (if (eq statement 'vacietis.c:if)
@@ -609,10 +638,16 @@
                              (#\e  (read-c-exp #\e))
                              ((nil))
                              (t    (c-unread-char next-char) nil)))
-               (if-exp    `(if ,test
-                               ,then
-                               ,(when (eq next-token 'vacietis.c:else)
-                                      (read-block-or-statement))))
+               (if-exp    (cond
+                            ((eq 'vacietis.c:int (c-type-of-exp test))
+                             `(if (not (eql 0 ,test))
+                                    ,then
+                                    ,(when (eq next-token 'vacietis.c:else)
+                                           (read-block-or-statement))))
+                            (t `(if ,test
+                                    ,then
+                                    ,(when (eq next-token 'vacietis.c:else)
+                                           (read-block-or-statement))))))
                #+nil
                (if-exp    `(if (eql 0 ,test)
                                ,(when (eq next-token 'vacietis.c:else)
@@ -668,43 +703,49 @@
 (defun read-function (name result-type)
   (declare (ignore result-type))
   (let (arglist
-        arglist-type-declarations)
+        arglist-type-declarations
+        (*local-var-types* (make-hash-table)))
     (block done-arglist
       (loop for param across (c-read-delimited-list (next-char) #\,) do
            (block done-arg
-             (when (and (vectorp param) (c-type? (aref param 0)))
-               (dbg "  param: ~S~%" param)
-               (push (lisp-type-declaration-for param)
-                     arglist-type-declarations))
-             (labels ((strip-type (x)
-                        (cond ((symbolp x)
-                               (push x arglist)
-                               (return-from done-arg))
-                              ((vectorp x)
-                               (loop for x1 across x do
-                                    (when (not (or (c-type? x1)
-                                                   (eq 'vacietis.c:* x1)))
-                                      (strip-type x1))))
-                              (t
-                               (read-error
-                                "Junk in argument list: ~A" x)))))
-               (loop for x across param do
-                    (cond
-                      ((eq x 'vacietis.c:|.|)
-                       (progn (push '&rest            arglist)
-                              (push 'vacietis.c:|...| arglist)
-                              (return-from done-arglist)))
-                      ((eq x t)
-                       (push '__c_t arglist))
-                      ((not (or (c-type? x) (eq 'vacietis.c:* x)))
-                       (strip-type x))))))))
+             (let ((arg-type
+                    (when (and (vectorp param) (c-type? (aref param 0)))
+                      (aref param 0))))
+               (labels ((strip-type (x)
+                          (cond ((symbolp x)
+                                 (setf (gethash x *local-var-types*) arg-type)
+                                 (push x arglist)
+                                 (return-from done-arg))
+                                ((vectorp x)
+                                 (loop for x1 across x do
+                                      (when (not (or (c-type? x1)
+                                                     (eq 'vacietis.c:* x1)))
+                                        (strip-type x1))))
+                                (t
+                                 (read-error
+                                  "Junk in argument list: ~A" x)))))
+                 (when (and (vectorp param) (c-type? (aref param 0)))
+                   (dbg "  param: ~S~%" param)
+                   (push (lisp-type-declaration-for param)
+                         arglist-type-declarations))
+                 (loop for x across param do
+                      (cond
+                        ((eq x 'vacietis.c:|.|)
+                         (progn (push '&rest            arglist)
+                                (push 'vacietis.c:|...| arglist)
+                                (return-from done-arglist)))
+                        ((eq x t)
+                         (let ((x '__c_t))
+                           (setf (gethash x *local-var-types*) arg-type)
+                           (push x arglist)))
+                        ((not (or (c-type? x) (eq 'vacietis.c:* x)))
+                         (strip-type x)))))))))
     (if (eql (peek-char nil %in) #\;)
         (prog1 t (c-read-char)) ;; forward declaration
         `(vac-defun/1 ,name ,(reverse arglist)
            (declare ,@(remove-if #'null arglist-type-declarations))
            ,(let* ((*variable-declarations* ())
                    (*variable-lisp-type-declarations* ())
-                   (*local-var-types*       (make-hash-table))
                    (body                    (read-c-block (next-char))))
               `(prog* ,*variable-declarations*
                   (declare ,@(remove-if #'null *variable-lisp-type-declarations*))
@@ -785,6 +826,7 @@
                    (destructuring-bind (qualifier name1 &optional val/size)
                        x
                      (setf name name1)
+                     (dbg "qualifier: ~S~%" qualifier)
                      (case qualifier
                        (vacietis.c:=
                         (setf initial-value (init-object name1 val/size))
@@ -1116,11 +1158,13 @@
 ;;; reader
 
 (defun cstr (str)
+  (format t "cstr: ~S~%" str)
   (with-input-from-string (s str)
     (let ((*compiler-state* (make-compiler-state))
           (*readtable*      c-readtable))
-      (cons 'progn (loop for it = (read s nil 'eof)
-                         while (not (eq it 'eof)) collect it)))))
+      (let ((body (cons 'progn (loop for it = (read s nil 'eof)
+                                  while (not (eq it 'eof)) collect it))))
+        (eval `(vac-progn/1 ,body))))))
 
 (defun %load-c-file (*c-file* *compiler-state*)
   (let ((*readtable*   c-readtable)

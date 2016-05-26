@@ -16,11 +16,11 @@
 foobar;"
   10)
 
-;; (eval-test for-loop0
-;;   "int foobar;
-;; for (int x = 0, foobar = 0; x <= 10; x++) foobar += x;
-;; foobar;"
-;;   55) ;; comes out to 0 because of foobar scope, bug or feature?
+(eval-test for-loop0
+  "int foobar;
+for (int x = 0, foobar = 0; x <= 10; x++) foobar += x;
+foobar;"
+   55) ;; comes out to 0 because of foobar scope, bug or feature? -> 55 now
 
 (eval-test for-loop1
   "int foobar = 0;
@@ -199,7 +199,7 @@ BAR;"
   1)
 
 (eval-test define-define1
-  "#define fo0 (x, y) x >> y
+  "#define fo0(x, y) x >> y
 #define Bar fo0
 Bar(0xFFF, 2);"
   1023)

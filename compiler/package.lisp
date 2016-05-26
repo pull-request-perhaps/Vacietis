@@ -27,6 +27,11 @@
 
 (in-package #:vacietis)
 
+(defparameter *debug* t)
+(defmacro dbg (&rest rest)
+  `(when *debug*
+     (format t ,@rest)))
+
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defreadtable vacietis ;; defreadtable isn't eval-whened, grrr
     (:merge :standard)
@@ -143,4 +148,10 @@
    ;; math
    #:truncl
    #:ceil
+   ;; integer operations
+   #:integer/
+   #:integer/=
+   ;; pointer operations
+   #:ptr+
+   #:ptr+=
    ))

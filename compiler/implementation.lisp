@@ -28,10 +28,13 @@
   ^    logxor
   &    logand
   *    *
-  /    (lambda (x y)
-         (if (and (integerp x) (integerp y))
-             (truncate x y)
-             (/ x y)))
+  /    /
+  integer/    (lambda (x y)
+                (if (and (integerp x) (integerp y))
+                    (truncate x y)
+                    (/ x y)))
+  ptr+ %ptr+
+         
   %    rem
   <<   ash
   >>   (lambda (int count) (ash int (- count))))
@@ -61,17 +64,50 @@
   (make-memptr :mem (make-array size :adjustable t :initial-element 0)))
 
 (defstruct place-ptr
+  offset
+  variable
   closure)
 
 (defmacro vacietis.c:mkptr& (place) ;; need to deal w/function pointers
   (let ((new-value   (gensym))
         (place       (macroexpand place)))
-    (if (and (consp place) (eq 'vacietis.c:deref* (elt place 0)))
-        (elt place 1)
-        `(make-place-ptr :closure (lambda (&optional ,new-value)
-                                    (if ,new-value
-                                        (setf ,place ,new-value)
-                                        ,place))))))
+    (dbg "mkptr& place: ~S~%" place)
+    ;; XXX assume aref/svref etc.
+    (cond
+      ((and (listp place)
+            (member (car place) '(aref vacietis.c:[])))
+       (let* ((place (copy-list place))
+              (variable (second place))
+              (initial-offset (third place)))
+         (setf (third place) 'offset)
+         `(let ((offset ,initial-offset))
+            (make-place-ptr
+             :offset offset
+             :variable ,variable
+             :closure (lambda (&optional ,new-value)
+                        (if ,new-value
+                            (setf ,place ,new-value)
+                            ,place))))))
+      (t
+       `(make-place-ptr
+         :offset nil
+         :variable nil
+         :closure (lambda (&optional ,new-value)
+                    (if ,new-value
+                        (setf ,place ,new-value)
+                        ,place)))))))
+
+(defun %ptr+ (ptr additional-offset)
+  (let* ((var (place-ptr-variable ptr))
+         (new-ptr (let ((offset (+ additional-offset (place-ptr-offset ptr))))
+                    (make-place-ptr
+                     :offset offset
+                     :variable var
+                     :closure (lambda (&optional new-value)
+                                (if new-value
+                                    (setf (aref var offset) new-value)
+                                    (aref var offset)))))))
+    new-ptr))
 
 (defun vacietis.c:deref* (ptr)
   (etypecase ptr
@@ -84,6 +120,8 @@
     (place-ptr (funcall (place-ptr-closure ptr) new-value))))
 
 (defmacro vacietis.c:[] (a i)
+  (make-aref a i)
+  #+nil
   `(vacietis.c:deref* (vacietis.c:+ ,a ,i)))
 
 (defmacro vacietis.c:|.| (x i)
@@ -119,6 +157,14 @@
 
 ;;; comparison operators
 
+(define-binary-op-mapping-definer define-comparison-ops
+  `(progn (defmethod ,op ((x place-ptr) (y place-ptr))
+            (and (eq  (place-ptr-variable x) (place-ptr-variable y))
+                     (,cl (place-ptr-offset x) (place-ptr-offset y))))
+          (defmethod ,op ((x number) (y number))
+            (,cl x y))))
+
+#+nil
 (define-binary-op-mapping-definer define-comparison-ops
   `(progn (defmethod ,op ((x memptr) (y memptr))
             (if (and (eq  (memptr-mem x) (memptr-mem y))
@@ -172,35 +218,35 @@
                           ,lvalue
                           ,rvalue))))))
 
-(unroll-assignment-ops += -= *= /= %= <<= >>= &= ^= |\|=|)
+(unroll-assignment-ops += -= *= integer/= ptr+= %= <<= >>= &= ^= |\|=|)
 
 ;;; iteration
 
 (defmacro vacietis.c:for ((bindings initialization test increment) body)
   `(let ,bindings
-     (tagbody ,@(awhen initialization (list it))
-      loop
+     (vacietis::do-tagbody ,@(awhen initialization (list it))
+       for-loop-label
         (when (eql 0 ,test)
           (go vacietis.c:break))
         ,body
       vacietis.c:continue
         ,@(awhen increment (list it))
-        (go loop)
+        (go for-loop-label)
       vacietis.c:break)))
 
 (defmacro vacietis.c:do (body test)
-  `(tagbody loop
+  `(vacietis::do-tagbody do-loop-label
       ,body
     vacietis.c:continue
-      (if (eql 0 ,test)
-          (go vacietis.c:break)
-          (go loop))
+    (if ,test
+        (go do-loop-label)
+        (go vacietis.c:break))
     vacietis.c:break))
 
 ;;; switch
 
 (defmacro vacietis.c:switch (exp cases body)
-  `(tagbody
+  `(vacietis::do-tagbody
       (case ,exp
         ,@(mapcar (lambda (x) `(,x (go ,x))) cases)
         (t (go ,(if (find 'vacietis.c:default body)

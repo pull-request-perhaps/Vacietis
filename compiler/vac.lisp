@@ -34,6 +34,85 @@
       (make-aref (second array-var) (third array-var) (append indexen (list index-var)))
       (list* 'aref array-var (nreverse (append indexen (list index-var))))))
 
+(defmacro vac-override (&body body)
+  `(macrolet ((vacietis.c:truncl (x)
+                `(sb-c::sbcl%fast-truncl ,x))
+              (vacietis.c:ceil (x)
+                `(ceiling ,x))
+              (vacietis::do-tagbody (&body body &environment env)
+                (let ((new-body
+                       (let (new-body)
+                         (do ((p (macroexpand body env) (cdr p)))
+                             ((endp p) (nreverse new-body))
+                           ;;(format t "(car p): ~S~%" (car p))
+                           (cond
+                             ((and (listp (car p))
+                                   (eq 'vacietis.c::do (car (car p))))
+                              (push 'do-loop-label new-body)
+                              (dolist (x (cdr (cadr (car p))))
+                                (push x new-body))
+                              (let ((test (caddr (car p))))
+                                (push 'do-continue new-body)
+                                (push `(if ,test
+                                           (go do-loop-label)
+                                           (go vacietis.c:break))
+                                      new-body)))
+                             (t (push (car p) new-body)))))))
+                  `(tagbody ,@new-body)))
+              (vacietis.c:! (a)
+                `(not ,a))
+              (vacietis.c:&& (a b)
+                `(and ,a ,b))
+              (vacietis.c:|\|\|| (a b)
+                          `(or ,a ,b))
+              (vacietis.c:< (&rest rest)
+                (format t "< macro: ~S~%" rest)
+                `(< ,@rest))
+              (vacietis.c:> (&rest rest)
+                `(> ,@rest))
+              (vacietis.c:<= (&rest rest)
+                `(<= ,@rest))
+              (vacietis.c:>= (&rest rest)
+                `(>= ,@rest))
+              (vacietis.c:+ (&rest rest)
+                `(+ ,@rest))
+              (vacietis.c:- (&rest rest)
+                `(- ,@rest))
+              (vacietis.c:* (&rest rest)
+                `(* ,@rest))
+              (vacietis.c:/ (&rest rest)
+                `(/ ,@rest))
+              (vacietis.c:[] (array-var index-var)
+                (make-aref array-var index-var))
+              (vacietis.c:|.|
+                (struct-var slot-index)
+                `(aref ,struct-var ,slot-index))
+              (vacietis:allocate-memory (size)
+                `(make-array ,size :element-type 'double-float))
+              (vacietis.c:for ((variable-declarations
+                                initializations
+                                test
+                                step)
+                               &body body)
+                ;;(declare (ignore variable-declarations))
+                (dbg ".c:for...: ~S~%" (list variable-declarations initializations test step))
+                `(progn
+                   ,initializations
+                   (loop while ,test
+                      do
+                        ,@body
+                        ,@(when step (list step))))))
+     ,@body))
+
+
+(defmacro vac-progn/1 (body)
+  (dbg "body: ~S~%" body)
+  `(vac-override
+    (let ((expanded-body (macroexpansion-of ,body)))
+      (dbg "expanded-body: ~S~%" expanded-body)
+      (eval (append nil expanded-body)))))
+
+
 (defmacro vac-defun/1 (name arglist &body body)
   (let ((declarations (loop for x in body
                          when (and (listp x) (eq 'declare (car x)))
@@ -43,61 +122,14 @@
                  collect x)))
     (dbg "decl: ~S~%" declarations)
     (dbg "body: ~S~%" body)
-    `(macrolet ((vacietis.c:truncl (x)
-                  `(sb-c::sbcl%fast-truncl ,x))
-                (vacietis.c:ceil (x)
-                  `(ceiling ,x))
-                (vacietis.c:! (a)
-                  `(not ,a))
-                (vacietis.c:&& (a b)
-                  `(and ,a ,b))
-                (vacietis.c:|\|\|| (a b)
-                  `(or ,a ,b))
-                (vacietis.c:< (&rest rest)
-                  `(< ,@rest))
-                (vacietis.c:> (&rest rest)
-                  `(> ,@rest))
-                (vacietis.c:<= (&rest rest)
-                  `(<= ,@rest))
-                (vacietis.c:>= (&rest rest)
-                  `(>= ,@rest))
-                (vacietis.c:+ (&rest rest)
-                  `(+ ,@rest))
-                (vacietis.c:- (&rest rest)
-                  `(- ,@rest))
-                (vacietis.c:* (&rest rest)
-                  `(* ,@rest))
-                (vacietis.c:/ (&rest rest)
-                  `(/ ,@rest))
-                (vacietis.c:[] (array-var index-var)
-                  (make-aref array-var index-var))
-                (vacietis.c:|.|
-                  (struct-var slot-index)
-                  `(aref ,struct-var ,slot-index))
-                (vacietis:allocate-memory (size)
-                  `(make-array ,size :element-type 'double-float))
-                (vacietis.c:for ((variable-declarations
-                                  initializations
-                                  test
-                                  step)
-                                 &body body)
-                  ;;(declare (ignore variable-declarations))
-                  (dbg ".c:for...: ~S~%" (list variable-declarations initializations test step))
-                  `(progn
-                     ,initializations
-                     (loop while ,test
-                        do
-                          ,@body
-                          ,@(when step (list step))))))
-       (dbg "~A ~S~%~S~%~S~%~S~%" ',name ',arglist
-            ',declarations
-            (macroexpansion-of ,@body)
-            nil
-            )
-       (eval (append nil (list 'defun ',name ',arglist
-                               '(declare (optimize (speed 3) (debug 0) (safety 0)))
-                               ;;'(declare (optimize (speed 3)))
-                               (when ',declarations ',@declarations)
-                               (macroexpansion-of ,@body))))
-       #+nil
-       (macroexpansion-of ,@body))))
+    `(vac-override
+       (let ((expanded-body (macroexpansion-of ,@body)))
+         (dbg "~A ~S~%~S~%~S~%"
+              ',name ',arglist
+              ',declarations
+              expanded-body)
+         (eval (append nil (list 'defun ',name ',arglist
+                                 '(declare (optimize (speed 3) (debug 0) (safety 0)))
+                                 ;;'(declare (optimize (speed 3)))
+                                 (when ',declarations ',@declarations)
+                                 expanded-body)))))))
