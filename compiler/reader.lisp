@@ -263,6 +263,7 @@
 (defun preprocessor-test (line)
   (let ((exp (with-input-from-string (%in line)
                (read-infix-exp (read-c-exp (next-char))))))
+    (dbg "preprocessor-test: ~S~%" exp)
     (not (eql 0 (eval `(symbol-macrolet
                            ,(let ((x))
                                  (maphash (lambda (k v)
