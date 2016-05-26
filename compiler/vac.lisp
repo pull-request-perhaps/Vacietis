@@ -95,12 +95,12 @@
                                 step)
                                &body body)
                 ;;(declare (ignore variable-declarations))
-                (dbg ".c:for...: ~S~%" (list variable-declarations initializations test step))
+                (dbg ".c:for...: ~S~%" (list variable-declarations initializations test step body))
                 `(progn
                    ,initializations
                    (loop while ,test
-                      do
-                        ,@body
+                        ,@(when (and body (not (equal body '(nil)))) '(do))
+                        ,@(when (and body (not (equal body '(nil)))) body)
                         ,@(when step (list step))))))
      ,@body))
 
