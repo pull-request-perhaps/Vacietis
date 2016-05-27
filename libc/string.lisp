@@ -5,3 +5,5 @@
   (aref vacietis.libc.errno.h::errno-strings errnum))
 
 (load-libc-file "string.c" #.(libc-dir))
+
+;;(vacietis::unconditionally-load-libc-file "string.c" #.(libc-dir))

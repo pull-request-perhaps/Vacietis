@@ -102,29 +102,45 @@
                          (setf ,place ,new-value)
                          ,place)))))))
 
-(defun %ptr+ (ptr additional-offset)
-  (if (place-ptr-p ptr)
-      (let ((var (place-ptr-variable ptr))
+(defun %ptr+ (ptr x)
+  ;;(dbg "%ptr+: ~S ~S~%" ptr additional-offset)
+  (cond
+    ;; addition of pointers is not actually valid C
+    ((and (place-ptr-p ptr) (place-ptr-p x))
+     (+ (place-ptr-offset ptr)
+        (place-ptr-offset x)))
+    ((place-ptr-p ptr)
+     (let* ((additional-offset x)
+            (var (place-ptr-variable ptr))
             (offset (+ additional-offset (place-ptr-offset ptr))))
-        ;;(dbg "%ptr+ called... ~S ~S~%" ptr additional-offset)
-        (if (= 0 offset)
-            var
-            (make-place-ptr
-             :offset offset
-             :variable var)))
-      (if (= 0 additional-offset)
-          ptr
-          (make-place-ptr
-           :offset additional-offset
-           :variable ptr))))
+       (if (= 0 offset)
+           var
+           (make-place-ptr
+            :offset offset
+            :variable var))))
+    ((place-ptr-p x)
+     (place-ptr-offset x))
+    (t
+     (if (= 0 x)
+         ptr
+         (make-place-ptr
+          :offset x
+          :variable ptr)))))
 
-(defun %ptr- (ptr additional-offset)
-  (%ptr+ ptr (* -1 additional-offset)))
+(defun %ptr- (ptr x)
+  (typecase x
+    (place-ptr
+     (let ((ptr-offset (typecase ptr
+                         (place-ptr (place-ptr-offset ptr))
+                         (t 0))))
+       (- ptr-offset (place-ptr-offset x))))
+    (t (%ptr+ ptr (- x)))))
 
 (defun vacietis.c:deref* (ptr)
   (etypecase ptr
     (memptr    (aref (memptr-mem ptr) (memptr-ptr ptr)))
-    (place-ptr (place-ptr-closure ptr))))
+    (place-ptr (place-ptr-closure ptr))
+    (simple-array (aref ptr 0))))
 
 (defun (setf vacietis.c:deref*) (new-value ptr)
   (etypecase ptr

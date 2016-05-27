@@ -50,3 +50,7 @@
   `(eval-when (:compile-toplevel :load-toplevel)
      (load-c-file
       (merge-pathnames ,file ,libc-dir))))
+
+(defmacro unconditionally-load-libc-file (file libc-dir)
+  `(load-c-file
+    (merge-pathnames ,file ,libc-dir)))

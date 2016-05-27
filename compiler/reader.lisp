@@ -739,12 +739,19 @@
     (block done-arglist
       (loop for param across (c-read-delimited-list (next-char) #\,) do
            (block done-arg
-             (let ((arg-type
+             (let ((ptrlev 0)
+                   (arg-type
                     (when (and (vectorp param) (c-type? (aref param 0)))
                       (aref param 0))))
                (labels ((strip-type (x)
                           (cond ((symbolp x)
-                                 (setf (gethash x *local-var-types*) arg-type)
+                                 (if (> ptrlev 0)
+                                     (let ((type arg-type))
+                                       (loop while (> ptrlev 0)
+                                          do (setq type (make-pointer-to :type type))
+                                            (decf ptrlev))
+                                       (setf (gethash x *local-var-types*) type))
+                                     (setf (gethash x *local-var-types*) arg-type))
                                  (push x arglist)
                                  (return-from done-arg))
                                 ((vectorp x)
@@ -770,6 +777,8 @@
                          (let ((x '__c_t))
                            (setf (gethash x *local-var-types*) arg-type)
                            (push x arglist)))
+                        ((eq 'vacietis.c:* x)
+                         (incf ptrlev))
                         ((not (or (c-type? x) (eq 'vacietis.c:* x)))
                          (strip-type x)))))))))
     (if (eql (peek-char nil %in) #\;)
