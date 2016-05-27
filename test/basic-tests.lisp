@@ -180,6 +180,25 @@ reverse(foo);
 foo;"
   "raboof")
 
+(eval-test strcmp
+           "
+int strcmp (char *s1, char *s2) {
+  char c1, c2;
+
+  while (*s1 || *s2) {
+    c1 = *s1++;
+    c2 = *s2++;
+    if (c1 < c2) return -1;
+    if (c1 > c2) return 1;
+  }
+  return 0;
+}
+char *foo = \"foo\";
+char *bar = \"foo?\";
+int r = strcmp(foo, bar);
+r;
+" -1)
+
 (eval-test sprintf-padchar
   "#include <stdio.h>
 char *foo[6];
