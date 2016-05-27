@@ -34,6 +34,7 @@
                     (truncate x y)
                     (/ x y)))
   ptr+ %ptr+
+  ptr- %ptr-
          
   %    rem
   <<   ash
@@ -48,9 +49,11 @@
   (ptr 0))
 
 (defun string-to-char* (string)
-  (make-memptr
-   :mem (let ((unicode (babel:string-to-octets string :encoding :utf-8)))
-          (adjust-array unicode (1+ (length unicode)) :initial-element 0))))
+  (let ((unicode (babel:string-to-octets string :encoding :utf-8)))
+    (make-array (1+ (length unicode))
+                ;; XXX need to handle unsigned char
+                :element-type '(signed-byte 8)
+                :initial-contents (concatenate '(simple-array (signed-byte 8) (*)) unicode #(0)))))
 
 (defun char*-to-string (char*)
   (let* ((mem        (memptr-mem char*))
@@ -66,7 +69,15 @@
 (defstruct place-ptr
   offset
   variable
-  closure)
+  %closure)
+(defun place-ptr-closure (ptr)
+  (aif (place-ptr-variable ptr)
+       (aref it (place-ptr-offset ptr))
+       (funcall (place-ptr-%closure ptr))))
+(defun (setf place-ptr-closure) (new-value ptr)
+  (aif (place-ptr-variable ptr)
+       (setf (aref it (place-ptr-offset ptr)) new-value)
+       (funcall (place-ptr-%closure ptr) new-value)))
 
 (defmacro vacietis.c:mkptr& (place) ;; need to deal w/function pointers
   (let ((new-value   (gensym))
@@ -79,45 +90,40 @@
        (let* ((place (copy-list place))
               (variable (second place))
               (initial-offset (third place)))
-         (setf (third place) 'offset)
-         `(let ((offset ,initial-offset))
-            (make-place-ptr
-             :offset offset
-             :variable ,variable
-             :closure (lambda (&optional ,new-value)
-                        (if ,new-value
-                            (setf ,place ,new-value)
-                            ,place))))))
+         (dbg "doing mkptr& of ~S~%" place)
+         `(make-place-ptr
+           :offset ,initial-offset
+           :variable ,variable)))
       (t
+       (dbg "attempting mkptr& of ~S~%" place)
        `(make-place-ptr
          :offset nil
          :variable nil
-         :closure (lambda (&optional ,new-value)
-                    (if ,new-value
-                        (setf ,place ,new-value)
-                        ,place)))))))
+         :%closure (lambda (&optional ,new-value)
+                     (if ,new-value
+                         (setf ,place ,new-value)
+                         ,place)))))))
 
 (defun %ptr+ (ptr additional-offset)
-  (let* ((var (place-ptr-variable ptr))
-         (new-ptr (let ((offset (+ additional-offset (place-ptr-offset ptr))))
-                    (make-place-ptr
-                     :offset offset
-                     :variable var
-                     :closure (lambda (&optional new-value)
-                                (if new-value
-                                    (setf (aref var offset) new-value)
-                                    (aref var offset)))))))
-    new-ptr))
+  (let ((var (place-ptr-variable ptr))
+        (offset (+ additional-offset (place-ptr-offset ptr))))
+    (dbg "%ptr+ called... ~S ~S~%" ptr additional-offset)
+    (make-place-ptr
+     :offset offset
+     :variable var)))
+
+(defun %ptr- (ptr additional-offset)
+  (%ptr+ ptr (* -1 additional-offset)))
 
 (defun vacietis.c:deref* (ptr)
   (etypecase ptr
     (memptr    (aref (memptr-mem ptr) (memptr-ptr ptr)))
-    (place-ptr (funcall (place-ptr-closure ptr)))))
+    (place-ptr (place-ptr-closure ptr))))
 
 (defun (setf vacietis.c:deref*) (new-value ptr)
   (etypecase ptr
     (memptr    (setf (aref (memptr-mem ptr) (memptr-ptr ptr)) new-value))
-    (place-ptr (funcall (place-ptr-closure ptr) new-value))))
+    (place-ptr (setf (place-ptr-closure ptr) new-value))))
 
 (defmacro vacietis.c:[] (a i)
   (make-aref a i)
@@ -140,6 +146,11 @@
 
 (defmethod vacietis.c:+ ((ptr memptr) (x integer))
   (make-memptr :mem (memptr-mem ptr) :ptr (+ x (memptr-ptr ptr))))
+
+(defmethod vacietis.c:+ ((ptr place-ptr) (x integer))
+  (%ptr+ ptr x))
+(defmethod vacietis.c:- ((ptr place-ptr) (x integer))
+  (%ptr- ptr x))
 
 (defmethod vacietis.c:+ ((x integer) (ptr memptr))
   (vacietis.c:+ ptr x))
@@ -218,7 +229,7 @@
                           ,lvalue
                           ,rvalue))))))
 
-(unroll-assignment-ops += -= *= integer/= ptr+= %= <<= >>= &= ^= |\|=|)
+(unroll-assignment-ops += -= *= integer/= ptr+= ptr-= %= <<= >>= &= ^= |\|=|)
 
 ;;; iteration
 

@@ -66,7 +66,6 @@
               (vacietis.c:|\|\|| (a b)
                           `(or ,a ,b))
               (vacietis.c:< (&rest rest)
-                (format t "< macro: ~S~%" rest)
                 `(< ,@rest))
               (vacietis.c:> (&rest rest)
                 `(> ,@rest))

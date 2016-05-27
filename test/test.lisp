@@ -6,12 +6,20 @@
 (def-suite vacietis-reader)
 (def-suite basic-tests)
 (def-suite program-tests)
+(def-suite pointer-tests)
+
+(defun run-pointer-tests ()
+  (format t "Running pointer tests:~&")
+  (run! 'pointer-tests))
+
+(defun run-basic-tests ()
+  (format t "Running basic tests:~&")
+  (run! 'basic-tests))
 
 (defun run-tests ()
   (format t "Running reader tests:~&")
   (run! 'vacietis-reader)
-  (format t "Running basic tests:~&")
-  (run! 'basic-tests)
+  (run-basic-tests)
   (format t "Running program tests:~&")
   (run! 'program-tests))
 
@@ -32,7 +40,7 @@
 (defmacro eval-test (name input result)
   `(test ,name
      (is (equalp ,(if (stringp result)
-                      `(string-to-char* ,result)
+                      `(vacietis.c:mkptr& (aref (string-to-char* ,result) 0))
                       result)
                  (do-with-temp-c-package ',name
                    (lambda ()

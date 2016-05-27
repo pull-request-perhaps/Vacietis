@@ -154,4 +154,6 @@
    ;; pointer operations
    #:ptr+
    #:ptr+=
+   #:ptr-
+   #:ptr-=
    ))
