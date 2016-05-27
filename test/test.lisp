@@ -8,6 +8,10 @@
 (def-suite program-tests)
 (def-suite pointer-tests)
 
+(defun run-reader-tests ()
+  (format t "Running reader tests:~&")
+  (run! 'vacietis-reader))
+
 (defun run-pointer-tests ()
   (format t "Running pointer tests:~&")
   (run! 'pointer-tests))
@@ -17,16 +21,16 @@
   (run! 'basic-tests))
 
 (defun run-tests ()
-  (format t "Running reader tests:~&")
-  (run! 'vacietis-reader)
+  (run-reader-tests)
+  (run-pointer-tests)
   (run-basic-tests)
   (format t "Running program tests:~&")
   (run! 'program-tests))
 
 (defmacro reader-test (name input &rest s-exps)
   `(test ,name
-     (is (equalp '(progn ,@s-exps)
-                 (vacietis::cstr ,input)))))
+     (is (equalp '(progn ,@s-exps))
+         (vacietis::cstr ,input))))
 
 (defun do-with-temp-c-package (name thunk)
   (let ((test-package (make-package

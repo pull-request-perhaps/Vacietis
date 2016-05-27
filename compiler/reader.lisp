@@ -403,6 +403,9 @@
   (let ((type
          (if (listp exp)
              (cond
+               ;; XXX do other ops
+               ((eq 'vacietis.c:+ (car exp))
+                (c-type-of-exp (cadr exp)))
                ((eq 'vacietis.c:= (car exp))
                 (c-type-of-exp (cadr exp)))
                ((eq 'prog1 (car exp))
@@ -471,7 +474,7 @@
                                        (c-type-of-exp lvalue base-type)))
                            (r-c-type (c-type-of-exp rvalue))
                            (op (or op (aref exp i))))
-                       (dbg "  -> type is: ~S~%" c-type)
+                       (dbg "  -> type of ~S is: ~S~%" lvalue c-type)
                        (when (member op '(vacietis.c:|\|\|| vacietis.c:&&))
                          (when (integer-type? (c-type-of-exp lvalue))
                            (setq lvalue `(not (eql 0 ,lvalue))))
@@ -735,8 +738,9 @@
           (vacietis.c:do
             (let ((body (read-block-or-statement)))
               (if (eql (next-exp) 'vacietis.c:while)
-                  (prog1 `(vacietis.c:do ,body ,(parse-infix (next-exp)))
-                    (read-c-statement (next-char))) ;; semicolon
+                  (let ((test (parse-infix (next-exp))))
+                    (prog1 `(vacietis.c:do ,body ,(if (integer-type? (c-type-of-exp test)) `(not (eql 0 ,test)) test))
+                      (read-c-statement (next-char)))) ;; semicolon
                   (read-error "No 'while' following a 'do'"))))
           (vacietis.c:for
             `(vacietis.c:for
@@ -903,8 +907,9 @@
                               (make-array-type
                                :element-type type
                                :dimensions   (awhen (or val/size init-size)
+                                               (dbg "array dimensions: ~S~%" it)
                                                (if (listp it)
-                                                   it
+                                                   (list (eval it))
                                                    (list it)))))
                         (parse-declaration name))
                        (vacietis.c:deref*

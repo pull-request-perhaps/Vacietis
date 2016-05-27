@@ -180,7 +180,8 @@
 (defun (setf vacietis.c:deref*) (new-value ptr)
   (etypecase ptr
     (memptr    (setf (aref (memptr-mem ptr) (memptr-ptr ptr)) new-value))
-    (place-ptr (setf (place-ptr-closure ptr) new-value))))
+    (place-ptr (setf (place-ptr-closure ptr) new-value))
+    (simple-array (setf (aref ptr 0) new-value))))
 
 (defmacro vacietis.c:[] (a i)
   (make-aref a i)
