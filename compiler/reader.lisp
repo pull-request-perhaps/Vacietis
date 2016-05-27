@@ -469,6 +469,7 @@
                      (let ((c-type (if (and (not (listp lvalue)) (boundp '*variable-declarations-base-type*))
                                        *variable-declarations-base-type*
                                        (c-type-of-exp lvalue base-type)))
+                           (r-c-type (c-type-of-exp rvalue))
                            (op (or op (aref exp i))))
                        (dbg "  -> type is: ~S~%" c-type)
                        (when (member op '(vacietis.c:|\|\|| vacietis.c:&&))
@@ -497,6 +498,10 @@
                                     ('vacietis.c:>= 'vacietis.c:ptr>=)
                                     ('vacietis.c:== 'vacietis.c:ptr==)
                                     ('vacietis.c:!= 'vacietis.c:ptr!=)
+                                    (t op)))
+                                 ((pointer-to-p r-c-type)
+                                  (case op
+                                    ('vacietis.c:+ 'vacietis.c:ptr+)
                                     (t op)))
                                  (t op)))
                              lvalue
