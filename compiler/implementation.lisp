@@ -90,12 +90,10 @@
        (let* ((place (copy-list place))
               (variable (second place))
               (initial-offset (third place)))
-         (dbg "doing mkptr& of ~S~%" place)
          `(make-place-ptr
            :offset ,initial-offset
            :variable ,variable)))
       (t
-       (dbg "attempting mkptr& of ~S~%" place)
        `(make-place-ptr
          :offset nil
          :variable nil
@@ -105,12 +103,20 @@
                          ,place)))))))
 
 (defun %ptr+ (ptr additional-offset)
-  (let ((var (place-ptr-variable ptr))
-        (offset (+ additional-offset (place-ptr-offset ptr))))
-    (dbg "%ptr+ called... ~S ~S~%" ptr additional-offset)
-    (make-place-ptr
-     :offset offset
-     :variable var)))
+  (if (place-ptr-p ptr)
+      (let ((var (place-ptr-variable ptr))
+            (offset (+ additional-offset (place-ptr-offset ptr))))
+        ;;(dbg "%ptr+ called... ~S ~S~%" ptr additional-offset)
+        (if (= 0 offset)
+            var
+            (make-place-ptr
+             :offset offset
+             :variable var)))
+      (if (= 0 additional-offset)
+          ptr
+          (make-place-ptr
+           :offset additional-offset
+           :variable ptr))))
 
 (defun %ptr- (ptr additional-offset)
   (%ptr+ ptr (* -1 additional-offset)))

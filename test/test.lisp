@@ -40,7 +40,8 @@
 (defmacro eval-test (name input result)
   `(test ,name
      (is (equalp ,(if (stringp result)
-                      `(vacietis.c:mkptr& (aref (string-to-char* ,result) 0))
+                      `(string-to-char* ,result)
+                      ;;`(vacietis.c:mkptr& (aref (string-to-char* ,result) 0))
                       result)
                  (do-with-temp-c-package ',name
                    (lambda ()
