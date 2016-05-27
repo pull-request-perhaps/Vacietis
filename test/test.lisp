@@ -29,8 +29,8 @@
 
 (defmacro reader-test (name input &rest s-exps)
   `(test ,name
-     (is (equalp '(progn ,@s-exps))
-         (vacietis::cstr ,input))))
+     (is (equalp '(progn ,@s-exps)
+                 (vacietis::cstr-noeval ,input)))))
 
 (defun do-with-temp-c-package (name thunk)
   (let ((test-package (make-package

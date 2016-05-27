@@ -1240,13 +1240,21 @@
 ;;; reader
 
 (defun cstr (str)
-  (format t "cstr: ~S~%" str)
+  (dbg "cstr: ~S~%" str)
   (with-input-from-string (s str)
     (let ((*compiler-state* (make-compiler-state))
           (*readtable*      c-readtable))
       (let ((body (cons 'progn (loop for it = (read s nil 'eof)
                                   while (not (eq it 'eof)) collect it))))
         (eval `(vac-progn/1 ,body))))))
+
+(defun cstr-noeval (str)
+  (with-input-from-string (s str)
+    (let ((*compiler-state* (make-compiler-state))
+          (*readtable*      c-readtable))
+      (let ((body (cons 'progn (loop for it = (read s nil 'eof)
+                                  while (not (eq it 'eof)) collect it))))
+        body))))
 
 (defun %load-c-file (*c-file* *compiler-state*)
   (let ((*readtable*   c-readtable)
