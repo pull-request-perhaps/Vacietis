@@ -468,11 +468,17 @@
                      (dbg "binary-op ~S ~S ~S~%" (or op (aref exp i)) lvalue rvalue)
                      (let ((c-type (if (and (not (listp lvalue)) (boundp '*variable-declarations-base-type*))
                                        *variable-declarations-base-type*
-                                       (c-type-of-exp lvalue base-type))))
+                                       (c-type-of-exp lvalue base-type)))
+                           (op (or op (aref exp i))))
                        (dbg "  -> type is: ~S~%" c-type)
-                       (list (let ((op (or op (aref exp i))))
+                       (when (member op '(vacietis.c:|\|\|| vacietis.c:&&))
+                         (when (integer-type? (c-type-of-exp lvalue))
+                           (setq lvalue `(not (eql 0 ,lvalue))))
+                         (when (integer-type? (c-type-of-exp rvalue))
+                           (setq rvalue `(not (eql 0 ,rvalue)))))
+                       (list (let ()
                                (cond
-                                 ((member c-type '(vacietis.c:long vacietis.c:int vacietis.c:short vacietis.c:char))
+                                 ((integer-type? c-type)
                                   (case op
                                     ('vacietis.c:/ 'vacietis.c:integer/)
                                     ('vacietis.c:/= 'vacietis.c:integer/=)
@@ -485,6 +491,12 @@
                                     ('vacietis.c:+= 'vacietis.c:ptr+=)
                                     ('vacietis.c:- 'vacietis.c:ptr-)
                                     ('vacietis.c:-= 'vacietis.c:ptr-=)
+                                    ('vacietis.c:< 'vacietis.c:ptr<)
+                                    ('vacietis.c:<= 'vacietis.c:ptr<=)
+                                    ('vacietis.c:> 'vacietis.c:ptr>)
+                                    ('vacietis.c:>= 'vacietis.c:ptr>=)
+                                    ('vacietis.c:== 'vacietis.c:ptr==)
+                                    ('vacietis.c:!= 'vacietis.c:ptr!=)
                                     (t op)))
                                  (t op)))
                              lvalue
@@ -644,6 +656,12 @@
           list))
     list))
 
+(defun integer-type? (type)
+  (member type
+          '(vacietis.c:long vacietis.c:int vacietis.c:short vacietis.c:char)))
+
+(defvar *function-name*)
+
 (defun read-control-flow-statement (statement)
   (flet ((read-block-or-statement ()
            (let ((next-char (next-char)))
@@ -684,7 +702,7 @@
           (vacietis.c:goto
             `(go ,(read-c-statement (next-char))))
           (vacietis.c:return
-            `(return ,(or (read-c-statement (next-char)) 0)))
+            `(return-from ,*function-name* ,(or (read-c-statement (next-char)) 0)))
           (vacietis.c:case
             (prog1 (car (push
                          (eval (parse-infix (next-exp))) ;; must be constant int
@@ -698,9 +716,9 @@
               `(vacietis.c:switch ,exp ,*cases* ,body)))
           (vacietis.c:while
            (let ((test (parse-infix (next-exp))))
+             (dbg "while test type: ~S~%" (c-type-of-exp test))
              (cond
-               ((member (c-type-of-exp test)
-                        '(vacietis.c:long vacietis.c:int vacietis.c:short vacietis.c:char))
+               ((integer-type? (c-type-of-exp test))
                 `(vacietis.c:for (nil nil (not (eql 0 ,test)) nil)
                                  ,(read-block-or-statement)))
                (t
@@ -735,6 +753,7 @@
   (declare (ignore result-type))
   (let (arglist
         arglist-type-declarations
+        (*function-name* name)
         (*local-var-types* (make-hash-table)))
     (block done-arglist
       (loop for param across (c-read-delimited-list (next-char) #\,) do

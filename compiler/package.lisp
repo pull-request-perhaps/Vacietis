@@ -156,4 +156,10 @@
    #:ptr+=
    #:ptr-
    #:ptr-=
+   #:ptr<
+   #:ptr<=
+   #:ptr>
+   #:ptr>=
+   #:ptr==
+   #:ptr!=
    ))

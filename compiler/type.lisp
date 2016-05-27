@@ -110,7 +110,8 @@
           (if (= length 2)
               (lisp-type-declaration-for (aref type 0) name)
               (when (eq (aref type 1) 'vacietis.c:*)
-                `(type (simple-array ,(lisp-type-for (aref type 0)) ,(make-list (- length 2) :initial-element '*)) ,name)))))))
+                `(type (or place-ptr
+                           (simple-array ,(lisp-type-for (aref type 0)) ,(make-list (- length 2) :initial-element '*))) ,name)))))))
 
 (defun lisp-constant-value-for (type constant)
   (cond

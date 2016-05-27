@@ -35,6 +35,12 @@
                     (/ x y)))
   ptr+ %ptr+
   ptr- %ptr-
+  ptr< %ptr<
+  ptr<= %ptr<=
+  ptr> %ptr>
+  ptr>= %ptr>=
+  ptr== %ptr==
+  ptr!= %ptr!=
          
   %    rem
   <<   ash
@@ -87,12 +93,19 @@
     (cond
       ((and (listp place)
             (member (car place) '(aref vacietis.c:[])))
-       (let* ((place (copy-list place))
-              (variable (second place))
-              (initial-offset (third place)))
-         `(make-place-ptr
-           :offset ,initial-offset
-           :variable ,variable)))
+       (let* ((variable (second place))
+              (initial-offset (third place))
+              (varsym (gensym)))
+         `(progn
+            (let ((,varsym ,variable))
+              (dbg "making place ptr to ~S(~S) ~S~%" ',variable ,varsym (place-ptr-p ,varsym))
+              (typecase ,varsym
+                (place-ptr
+                 (dbg " is place-ptr...~%")
+                 ,varsym)
+                (t (make-place-ptr
+                    :offset ,initial-offset
+                    :variable ,varsym)))))))
       (t
        `(make-place-ptr
          :offset nil
@@ -103,7 +116,7 @@
                          ,place)))))))
 
 (defun %ptr+ (ptr x)
-  ;;(dbg "%ptr+: ~S ~S~%" ptr additional-offset)
+  (dbg "%ptr+: ~S ~S~%" ptr x)
   (cond
     ;; addition of pointers is not actually valid C
     ((and (place-ptr-p ptr) (place-ptr-p x))
@@ -136,7 +149,22 @@
        (- ptr-offset (place-ptr-offset x))))
     (t (%ptr+ ptr (- x)))))
 
+(defun %ptr< (x y)
+  (< (place-ptr-offset x) (place-ptr-offset y)))
+(defun %ptr<= (x y)
+  (<= (place-ptr-offset x) (place-ptr-offset y)))
+(defun %ptr> (x y)
+  (> (place-ptr-offset x) (place-ptr-offset y)))
+(defun %ptr>= (x y)
+  (>= (place-ptr-offset x) (place-ptr-offset y)))
+(defun %ptr== (x y)
+  (and (eq (place-ptr-variable x) (place-ptr-variable y))
+       (= (place-ptr-offset x) (place-ptr-offset y))))
+(defun %ptr!= (x y)
+  (not (%ptr== x y)))
+
 (defun vacietis.c:deref* (ptr)
+  (dbg "deref*: ~S~%" ptr)
   (etypecase ptr
     (memptr    (aref (memptr-mem ptr) (memptr-ptr ptr)))
     (place-ptr (place-ptr-closure ptr))
