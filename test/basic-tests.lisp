@@ -177,7 +177,7 @@ strlen(\"foobar\");"
 
 char *foo = \"foobar\";
 reverse(foo);
-foo;"
+0+foo;"
   "raboof")
 
 (eval-test strcmp

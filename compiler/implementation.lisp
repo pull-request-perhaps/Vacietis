@@ -133,7 +133,7 @@
             :variable var))))
     ((and (place-ptr-p x) (not (place-ptr-p ptr)))
      (let ((offset (+ ptr (place-ptr-offset x))))
-       (if (= 0 x)
+       (if (= 0 offset)
            (place-ptr-variable x)
            (make-place-ptr
             :offset offset
