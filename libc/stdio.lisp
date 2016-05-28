@@ -11,9 +11,21 @@
    (ferror   :initform 0        :accessor ferror)
    (tmp-file :initform nil      :accessor tmp-file)))
 
-(defvar stdin  (make-instance 'FILE :stream *standard-input*))
-(defvar stdout (make-instance 'FILE :stream *standard-output*))
-(defvar stderr (make-instance 'FILE :stream *error-output*))
+(defvar stdin (make-instance 'FILE
+                             :stream (open "/dev/stdin"
+                                           :direction :output
+                                           :if-exists :append
+                                           :element-type '(unsigned-byte 8))))
+(defvar stdout (make-instance 'FILE
+                              :stream (open "/dev/stdout"
+                                            :direction :output
+                                            :if-exists :append
+                                            :element-type '(unsigned-byte 8))))
+(defvar stderr (make-instance 'FILE
+                              :stream (open "/dev/stderr"
+                                            :direction :output
+                                            :if-exists :append
+                                            :element-type '(unsigned-byte 8))))
 
 (defun/1 clearerr (fd)
   (setf (feof fd)   0
@@ -96,8 +108,18 @@
 
 ;;; character I/O
 
+(defun c-char-code (c)
+  (if (characterp c)
+      (char-code c)
+      (if (> c 127)
+          (- (- c 127))
+          c)))
+
+(defun c-read-char (stream)
+  (read-byte stream))
+
 (defun/1 fgetc (fd)
-  (handler-case (char-code (read-char (fd-stream fd)))
+  (handler-case (c-char-code (c-read-char (fd-stream fd)))
     (end-of-file ()
       (setf (feof fd) 1)
       EOF)
@@ -111,8 +133,24 @@
 (defun/1 getchar ()
   (getc stdin))
 
+(defun c-code-char (c)
+  (if (characterp c)
+      (char-code c)
+      (if (< c 0)
+          (+ 127 (- c))
+          c)))
+
+(defun c-write-char (c stream)
+  (let ((byte (if (characterp c)
+                  (char-code c)
+                  c)))
+    (write-byte byte stream)
+    (when (= 10 byte)
+      (force-output stream))))
+
 (defun/1 fputc (c fd)
-  (handler-case (progn (write-char (code-char c) (fd-stream fd))
+  (handler-case (progn (c-write-char (c-code-char c) (fd-stream fd))
+                       (force-output (fd-stream fd))
                        c)
     (error ()
       (setf (ferror fd) EIO)
@@ -163,7 +201,7 @@
   0)
 
 (defun/1 ungetc (c fd)
-  (handler-case (progn (unread-char (code-char c) (fd-stream fd))
+  (handler-case (progn (unread-char (c-code-char c) (fd-stream fd))
                        c)
     (error ()
       (setf (ferror fd) EIO)
@@ -243,16 +281,16 @@
 (defmacro with-padding (count &body body) ;; variable capture ahoy
   `(progn
      (when right-justify?
-       (loop repeat ,count do (write-char pad-char stream)))
+       (loop repeat ,count do (c-write-char pad-char stream)))
      ,@body
      (unless right-justify?
-       (loop repeat ,count do (write-char pad-char stream)))))
+       (loop repeat ,count do (c-write-char pad-char stream)))))
 
 (defun zclib>read-decimal-from-string (str idx)
   "Reads a decimal value out of a string, stopping at the first
    non-digit. Returns the value read and the next index in the
    string."
-  (let ((positive (case (code-char (aref str idx))
+  (let ((positive (case (c-code-char (aref str idx))
                     (#\+ (incf idx) t)
                     (#\- (incf idx) nil)
                     (t t))))
@@ -283,7 +321,7 @@
       (with-padding (- width (+ val-len leading-0s))
         (write-string sign stream)
         (loop repeat leading-0s			; This is how ANSI says to do this
-              do (write-char #\0 stream))
+              do (c-write-char #\0 stream))
         (write-string buffer stream)))))
 
 (defun zclib>print-flonum-1 (val precision uppercase-E-format? e-format)
@@ -309,9 +347,9 @@
          (val-len   (+ (length buffer)
                        (if (or negative? always+- spacep) 1 0))))
     (with-padding (- width val-len)
-      (cond (negative? (write-char #\-     stream))
-            (always+-  (write-char #\+     stream))
-            (spacep    (write-char #\Space stream)))
+      (cond (negative? (c-write-char #\-     stream))
+            (always+-  (c-write-char #\+     stream))
+            (spacep    (c-write-char #\Space stream)))
       (write-string buffer stream))))
 
 (defun/1 fprintf (fd fmt &rest args)
@@ -333,8 +371,9 @@
    If a minus sign appears before <width>, the value is left justified in the
    field; if a zero appears before <width>, padding will be done with zeros instead
    of blanks.  An `l' before <conv> is ignored, as is the case of <conv>."
-  (let ((fmt-array (memptr-mem fmt))
-        (stream    (fd-stream fd)))
+  (let* ((fmt (vacietis::ensure-memptr fmt))
+         (fmt-array (memptr-mem fmt))
+         (stream    (fd-stream fd)))
     (do ((fmt-index (memptr-ptr fmt) (1+ fmt-index)))
         ((= (aref fmt-array fmt-index) 0) 0)
       (let ((ch (aref fmt-array fmt-index)))
@@ -388,7 +427,7 @@
 
              (when (and precision (minusp precision))
                (setf precision nil))    ; Per ANSI spec
-             (when (find (code-char (aref fmt-array next-idx)) "lLh")
+             (when (find (c-code-char (aref fmt-array next-idx)) "lLh")
                (incf next-idx))         ; Discard long/short info
 
              (let ((char (code-char (aref fmt-array next-idx))))
@@ -430,7 +469,7 @@
                  (#\c
                   (with-padding (1- width)
                     (unless (zerop (car args))
-                      (write-char (code-char (pop args)) stream))))
+                      (c-write-char (c-code-char (pop args)) stream))))
                  (#\s
                   (let* ((string (pop args))
                          (length (min (or precision most-positive-fixnum)
@@ -439,10 +478,10 @@
                       (let ((str   (memptr-mem string))
                             (start (memptr-ptr string)))
                         (loop for i from start below (+ start length) do
-                             (write-char (code-char (aref str i)) stream))))))
+                             (c-write-char (c-code-char (aref str i)) stream))))))
                  (otherwise
-                  (write-char char stream)))))
-            (write-char (code-char ch) stream))))))
+                  (c-write-char char stream)))))
+            (c-write-char (c-code-char ch) stream))))))
 
 (defun/1 printf (fmt &rest args)
   (apply #'fprintf stdout fmt args))

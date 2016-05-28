@@ -50,6 +50,8 @@
 
 ;;; pointers, storage units and allocation
 
+
+#+nil
 (defstruct memptr
   mem
   (ptr 0))
@@ -57,9 +59,15 @@
 (defun string-to-char* (string)
   (let ((unicode (babel:string-to-octets string :encoding :utf-8)))
     (make-array (1+ (length unicode))
-                ;; XXX need to handle unsigned char
                 :element-type '(signed-byte 8)
-                :initial-contents (concatenate '(simple-array (signed-byte 8) (*)) unicode #(0)))))
+                :initial-contents (concatenate '(simple-array (signed-byte 8) (*))
+                                               (map 'vector
+                                                    (lambda (c)
+                                                      (if (> c 127)
+                                                          (- (- c 127))
+                                                          c))
+                                                    unicode)
+                                               #(0)))))
 
 (defun char*-to-string (char*)
   (let* ((mem        (memptr-mem char*))
@@ -69,6 +77,13 @@
     (replace byte-array mem :start2 start :end2 end)
     (babel:octets-to-string byte-array :encoding :utf-8)))
 
+(defun make-memptr (&key mem)
+  (make-place-ptr :variable mem
+                  :offset 0))
+(defun ensure-memptr (ptr)
+  (typecase ptr
+    (place-ptr ptr)
+    (t (make-memptr :mem ptr))))
 (defun allocate-memory (size)
   (make-memptr :mem (make-array size :adjustable t :initial-element 0)))
 
@@ -84,6 +99,10 @@
   (aif (place-ptr-variable ptr)
        (setf (aref it (place-ptr-offset ptr)) new-value)
        (funcall (place-ptr-%closure ptr) new-value)))
+(defun memptr-mem (ptr)
+  (place-ptr-variable ptr))
+(defun memptr-ptr (ptr)
+  (place-ptr-offset ptr))
 
 (defmacro vacietis.c:mkptr& (place) ;; need to deal w/function pointers
   (let ((new-value   (gensym))
@@ -116,7 +135,7 @@
                          ,place)))))))
 
 (defun %ptr+ (ptr x)
-  (dbg "%ptr+: ~S ~S~%" ptr x)
+  ;;(dbg "%ptr+: ~S ~S~%" ptr x)
   (cond
     ;; addition of pointers is not actually valid C
     ((and (place-ptr-p ptr) (place-ptr-p x))
@@ -171,15 +190,15 @@
   (not (%ptr== x y)))
 
 (defun vacietis.c:deref* (ptr)
-  (dbg "deref*: ~S~%" ptr)
+  ;;(dbg "deref*: ~S~%" ptr)
   (etypecase ptr
-    (memptr    (aref (memptr-mem ptr) (memptr-ptr ptr)))
+    ;;(memptr    (aref (memptr-mem ptr) (memptr-ptr ptr)))
     (place-ptr (place-ptr-closure ptr))
     (simple-array (aref ptr 0))))
 
 (defun (setf vacietis.c:deref*) (new-value ptr)
   (etypecase ptr
-    (memptr    (setf (aref (memptr-mem ptr) (memptr-ptr ptr)) new-value))
+    ;;(memptr    (setf (aref (memptr-mem ptr) (memptr-ptr ptr)) new-value))
     (place-ptr (setf (place-ptr-closure ptr) new-value))
     (simple-array (setf (aref ptr 0) new-value))))
 
@@ -202,27 +221,27 @@
 (defmethod vacietis.c:+ ((x number) (y number))
   (+ x y))
 
-(defmethod vacietis.c:+ ((ptr memptr) (x integer))
-  (make-memptr :mem (memptr-mem ptr) :ptr (+ x (memptr-ptr ptr))))
+;;(defmethod vacietis.c:+ ((ptr memptr) (x integer))
+;;  (make-memptr :mem (memptr-mem ptr) :ptr (+ x (memptr-ptr ptr))))
 
 (defmethod vacietis.c:+ ((ptr place-ptr) (x integer))
   (%ptr+ ptr x))
 (defmethod vacietis.c:- ((ptr place-ptr) (x integer))
   (%ptr- ptr x))
 
-(defmethod vacietis.c:+ ((x integer) (ptr memptr))
-  (vacietis.c:+ ptr x))
+;;(defmethod vacietis.c:+ ((x integer) (ptr memptr))
+;;  (vacietis.c:+ ptr x))
 
 (defmethod vacietis.c:- ((x number) (y number))
   (- x y))
 
-(defmethod vacietis.c:- ((ptr memptr) (x integer))
-  (make-memptr :mem (memptr-mem ptr) :ptr (- (memptr-ptr ptr) x)))
+;;(defmethod vacietis.c:- ((ptr memptr) (x integer))
+;;  (make-memptr :mem (memptr-mem ptr) :ptr (- (memptr-ptr ptr) x)))
 
-(defmethod vacietis.c:- ((ptr1 memptr) (ptr2 memptr))
-  (assert (eq (memptr-mem ptr1) (memptr-mem ptr2)) ()
-          "Trying to subtract pointers from two different memory segments")
-  (- (memptr-ptr ptr1) (memptr-ptr ptr2)))
+;;(defmethod vacietis.c:- ((ptr1 memptr) (ptr2 memptr))
+;;  (assert (eq (memptr-mem ptr1) (memptr-mem ptr2)) ()
+;;          "Trying to subtract pointers from two different memory segments")
+;;  (- (memptr-ptr ptr1) (memptr-ptr ptr2)))
 
 ;;; comparison operators
 
