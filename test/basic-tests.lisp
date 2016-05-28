@@ -357,6 +357,34 @@ r.pt2.y = 3;
 r.pt2.y + rp->pt2.y + (r.pt2).y + (rp->pt2).y;"
   12)
 
+(eval-test structs4 "
+struct vel {
+  float x;
+  float y;
+};
+struct point {
+  int x;
+  int y;
+  char z;
+  struct vel vel;
+};
+
+struct point pt = { 7, 11, 1, {0.0f, 0.0f} };
+pt.x + pt.y + pt.z;
+"
+           19)
+
+(eval-test struct-arrays1 "
+struct point {
+  int x;
+  int y;
+};
+
+struct point pts[] = {{ 7, 11 },};
+pts[0].x + pts[0].y;
+"
+           18)
+
 (eval-test ptr-addr-decl1
   "int x, *y = &x;
 x = 3;

@@ -419,6 +419,9 @@
                ((eq 'vacietis.c:% (car exp))
                 ;; XXX assume int
                 'vacietis.c:int)
+               ((eq 'vacietis.c:|.| (car exp))
+                (let ((struct-type (c-type-of-exp (cadr exp))))
+                  (nth (caddr exp) (struct-type-slots struct-type))))
                ((eq 'vacietis.c:[] (car exp))
                 (let ((type (c-type-of-exp (cadr exp))))
                   ;;(dbg "c-type of ~S: ~S~%" (cadr exp) type)
@@ -598,6 +601,7 @@
                  ((find x #(vacietis.c:|.| vacietis.c:->))
                   (let ((exp (parse-binary i)))
                     (let ((ctype (c-type-of-exp (elt exp 1))))
+                      (dbg "struct accessor: ctype of ~S: ~S~%" (elt exp 1) ctype)
                       (return-from parse-infix
                         `(vacietis.c:|.|
                                      ,(if (eq x 'vacietis.c:->)
@@ -850,7 +854,8 @@
                       :element-type (lisp-type-for base-type)
                       :initial-contents (get-elements base-type dimensions value))))))
 
-(defun pass2-struct (type array)
+;; for an array of struct typed objects
+(defun pass2-struct-array (type array)
   (loop for i from 0 upto (1- (length array)) do
        (let ((row (aref array i)))
          (loop for j from 0 upto (1- (length row)) do
@@ -861,7 +866,19 @@
                           (element-type (slot-value slot-type 'element-type)))
                      ;;(dbg "element-type: ~S (~S)~%" element-type (length it))
                      (setf (aref row j)
-                           (make-array (length it) :element-type (lisp-type-for element-type) :initial-contents it))))))))))
+                           (make-array (length it)
+                                       :element-type (lisp-type-for element-type)
+                                       :initial-contents it))))))))))
+
+(defun to-struct-value (type value)
+  (let ((row (map 'vector #'identity (vector-literal-elements value))))
+    (dbg "lisp-type: ~S~%" (lisp-type-for type))
+    (dbg "row: ~S~%" row)
+    (let* ((lisp-type (lisp-type-for type))
+           (element-type (cadr lisp-type)))
+      (make-array (length row)
+                  :element-type element-type
+                  :initial-contents row))))
 
 (defun process-variable-declaration (spec base-type)
   (let (name (type base-type) initial-value init-size)
@@ -871,13 +888,14 @@
                      ;; (vacietis.c:[] elp10 nil)
                      ;; name1: (vacietis.c:[] (vacietis.c:[] del 4) 5)
                      ;; name1: (vacietis.c:[] (vacietis.c:[] (vacietis.c:[] del 3) 4) 5)
-                     (dbg "variable declaration of ~S: type: ~S~%" name type)
+                     (dbg "variable declaration of ~S: type: ~S name1: ~S~%" name type name1)
                      (if (struct-type-p type)
-                         (progn
-                           (let ((array (to-lisp-array base-type name1 value)))
-                             (pass2-struct type array)
-                             (setf init-size (length array))
-                             array))
+                         (if (symbolp name)
+                             (to-struct-value type value)
+                             (let ((array (to-lisp-array base-type name1 value)))
+                               (pass2-struct-array type array)
+                               (setf init-size (length array))
+                               array))
                          (progn
                            (let ((array (to-lisp-array base-type name1 value)))
                              (setf init-size (array-dimensions array))
