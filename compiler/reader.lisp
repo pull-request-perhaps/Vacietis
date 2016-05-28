@@ -834,10 +834,15 @@
 (defun get-elements (base-type dimensions value)
   (if (= 1 (length dimensions))
       (map 'vector #'(lambda (x)
+                       ;;(dbg "element value: ~S~%" x)
                        (if (vector-literal-p x)
                            (let ((elements (vector-literal-elements x)))
                              (get-elements base-type (list (length elements)) x))
-                           (eval x)))
+                           ;; XXX fix this
+                           (let ((constant-value (ignore-errors (eval x))))
+                             (if constant-value
+                                 (lisp-constant-value-for base-type constant-value)
+                                 x))))
            (vector-literal-elements value))
       (map 'vector #'(lambda (x)
                        (get-elements base-type (cdr dimensions) x))
@@ -848,11 +853,12 @@
     (if (null (car dimensions))
         (remove-if #'null (get-elements base-type dimensions value))
         ;;(get-elements base-type dimensions value)
-        (progn
+        (let ((elements (get-elements base-type dimensions value)))
           (dbg "making array of dimensions ~S~%" dimensions)
+          (dbg "elements: ~S~%" elements)
           (make-array dimensions
                       :element-type (lisp-type-for base-type)
-                      :initial-contents (get-elements base-type dimensions value))))))
+                      :initial-contents elements)))))
 
 ;; for an array of struct typed objects
 (defun pass2-struct-array (type array)
