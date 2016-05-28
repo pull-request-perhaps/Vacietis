@@ -130,3 +130,7 @@ Index    Item    Difference
 (program-test pointer-lvalue2
               :output "5
 ")
+
+(program-test duff
+              :output "3333332222222211111111"
+              :return-code 0)
