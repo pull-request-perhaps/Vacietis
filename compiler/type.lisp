@@ -6,6 +6,9 @@
 (cl:defparameter vacietis::*basic-c-types*
   #(int void short long float double char))
 
+(cl:defparameter vacietis::*unsigned-basic-c-types*
+  #(unsigned-int unsigned-short unsigned-long unsigned-char))
+
 (cl:in-package #:vacietis)
 
 (defstruct c-function
@@ -100,6 +103,10 @@
     ((eq type 'vacietis.c:int)    '(signed-byte 32))
     ((eq type 'vacietis.c:short)  '(signed-byte 16))
     ((eq type 'vacietis.c:char)   '(signed-byte 8))
+    ((eq type 'vacietis.c:unsigned-long)   '(unsigned-byte 64))
+    ((eq type 'vacietis.c:unsigned-int)    '(unsigned-byte 32))
+    ((eq type 'vacietis.c:unsigned-short)  '(unsigned-byte 16))
+    ((eq type 'vacietis.c:unsigned-char)   '(unsigned-byte 8))
     (t t)))
 
 (defun lisp-type-declaration-for (type &optional name)
@@ -133,4 +140,8 @@
     ((eq type 'vacietis.c:int)    (the (signed-byte 32) constant))
     ((eq type 'vacietis.c:short)  (the (signed-byte 16) constant))
     ((eq type 'vacietis.c:char)   (the (signed-byte 8)  constant))
+    ((eq type 'vacietis.c:unsigned-long)   (the (unsigned-byte 64) constant))
+    ((eq type 'vacietis.c:unsigned-int)    (the (unsigned-byte 32) constant))
+    ((eq type 'vacietis.c:unsigned-short)  (the (unsigned-byte 16) constant))
+    ((eq type 'vacietis.c:unsigned-char)   (the (unsigned-byte 8)  constant))
     (t constant)))

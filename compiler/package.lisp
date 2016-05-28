@@ -163,4 +163,10 @@
    #:ptr>=
    #:ptr==
    #:ptr!=
+
+   ;; unsigned types
+   #:unsigned-char
+   #:unsigned-short
+   #:unsigned-int
+   #:unsigned-long
    ))

@@ -376,10 +376,14 @@
 (defun basic-type? (x)
   (find x *basic-c-types*))
 
+(defun unsigned-basic-type? (x)
+  (find x *unsigned-basic-c-types*))
+
 (defun c-type? (identifier)
   ;; and also do checks for struct, union, enum and typedef types
-  (or (type-qualifier? identifier)
-      (basic-type?     identifier)
+  (or (type-qualifier?        identifier)
+      (basic-type?            identifier)
+      (unsigned-basic-type?   identifier)
       (find identifier #(vacietis.c:struct vacietis.c:enum))
       (gethash identifier (compiler-state-typedefs *compiler-state*))))
 
@@ -721,7 +725,8 @@
 
 (defun integer-type? (type)
   (member type
-          '(vacietis.c:long vacietis.c:int vacietis.c:short vacietis.c:char)))
+          '(vacietis.c:long vacietis.c:int vacietis.c:short vacietis.c:char
+            vacietis.c:unsigned-long vacietis.c:unsigned-int vacietis.c:unsigned-short vacietis.c:unsigned-char)))
 
 (defvar *function-name*)
 
@@ -1023,6 +1028,7 @@
 
 (defvar *is-extern*)
 (defvar *is-const*)
+(defvar *is-unsigned*)
 
 (defun read-variable-declarations (spec-so-far base-type)
   (let* ((*variable-declarations-base-type* base-type)
@@ -1111,6 +1117,17 @@
       (progn (next-char) t)
       (read-variable-declarations #() 'vacietis.c:int)))
 
+(defun modify-base-type (base-type)
+  (cond
+    (*is-unsigned*
+     (case base-type
+       ('vacietis.c:char   'vacietis.c:unsigned-char)
+       ('vacietis.c:short  'vacietis.c:unsigned-short)
+       ('vacietis.c:int    'vacietis.c:unsigned-int)
+       ('vacietis.c:long   'vacietis.c:unsigned-long)
+       (t base-type)))
+    (t base-type)))
+
 (defun read-base-type (token)
   (loop while (type-qualifier? token)
      do
@@ -1118,6 +1135,8 @@
        (case token
          ('vacietis.c:extern
           (setq *is-extern* t))
+         ('vacietis.c:unsigned
+          (setq *is-unsigned* t))
          ('vacietis.c:const
           (setq *is-const* t)))
        (setf token (next-exp)))
@@ -1134,7 +1153,7 @@
                (or (gethash name (compiler-state-structs *compiler-state*))
                    (make-struct-type :name name)))))
         ((or (basic-type? token) (c-type-p token))
-         token)
+         (modify-base-type token))
         (t
          (read-error "Unexpected parser error: unknown type ~A" token))))
 
@@ -1173,9 +1192,12 @@
 
 (defun read-declaration (token)
   (cond ((eq 'vacietis.c:typedef token)
-         (read-typedef (read-base-type (next-exp))))
+         (let ((*is-unsigned* nil))
+           (read-typedef (read-base-type (next-exp)))))
         ((c-type? token)
          (let* ((*is-extern* nil)
+                (*is-const* nil)
+                (*is-unsigned* nil)
                 (base-type (read-base-type token)))
            (cond ((struct-type-p base-type)
                   (read-struct base-type))
