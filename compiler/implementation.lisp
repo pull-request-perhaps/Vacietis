@@ -126,9 +126,13 @@
        (setf (aref it (place-ptr-offset ptr)) new-value)
        (funcall (place-ptr-%closure ptr) new-value)))
 (defun memptr-mem (ptr)
-  (place-ptr-variable ptr))
+  (typecase ptr
+    (place-ptr (place-ptr-variable ptr))
+    (t ptr)))
 (defun memptr-ptr (ptr)
-  (place-ptr-offset ptr))
+  (typecase ptr
+    (place-ptr (place-ptr-offset ptr))
+    (t 0)))
 (defun memptr-type (ptr)
   ;;(format t "memptr-type: ~S~%" ptr)
   (let ((mem (ensure-memptr ptr)))
@@ -237,8 +241,16 @@
 (defun %ptr>= (x y)
   (>= (ensure-place-ptr-offset x) (ensure-place-ptr-offset y)))
 (defun %ptr== (x y)
-  (and (eq (place-ptr-variable x) (place-ptr-variable y))
-       (= (place-ptr-offset x) (place-ptr-offset y))))
+  (cond
+    ((or (null x) (eql 0 x))
+     (not (and y (not (eql 0 y)))))
+    ((or (null y) (eql 0 y))
+     (not (and x (not (eql 0 x)))))
+    ((or (not (place-ptr-p x)) (not (place-ptr-p y)))
+     (eq x y))
+    (t
+     (and (eq (place-ptr-variable x) (place-ptr-variable y))
+          (= (place-ptr-offset x) (place-ptr-offset y))))))
 (defun %ptr!= (x y)
   (not (%ptr== x y)))
 
