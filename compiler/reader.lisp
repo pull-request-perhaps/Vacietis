@@ -391,11 +391,16 @@
                                 (compiler-state-var-types *compiler-state*))))))
 
 (defun c-type-of (x)
-  (or (when *local-var-types*
-        (dbg "c-type-of ~S~%" x)
-        (maphash #'(lambda (k v) (dbg "  ~S: ~S~%" k v)) *local-var-types*)
-        (gethash x *local-var-types*))
-      (gethash x (compiler-state-var-types *compiler-state*))))
+  (if (and (constantp x) (numberp x))
+      (typecase x
+        (double-float 'vacietis.c:double)
+        (single-float 'vacietis.c:float)
+        (t 'vacietis.c:int))
+      (or (when *local-var-types*
+            (dbg "c-type-of ~S~%" x)
+            (maphash #'(lambda (k v) (dbg "  ~S: ~S~%" k v)) *local-var-types*)
+            (gethash x *local-var-types*))
+          (gethash x (compiler-state-var-types *compiler-state*)))))
 
 (defun c-type-of-exp (exp &optional base-type)
   ;;(when *local-var-types* (maphash #'(lambda (k v) (dbg "  ~S: ~S~%" k v)) *local-var-types*))
@@ -404,7 +409,13 @@
          (if (listp exp)
              (cond
                ;; XXX do other ops
+               ((eq 'vacietis.c:* (car exp))
+                (c-type-of-exp (cadr exp)))
+               ((eq 'vacietis.c:/ (car exp))
+                (c-type-of-exp (cadr exp)))
                ((eq 'vacietis.c:+ (car exp))
+                (c-type-of-exp (cadr exp)))
+               ((eq 'vacietis.c:- (car exp))
                 (c-type-of-exp (cadr exp)))
                ((eq 'vacietis.c:= (car exp))
                 (c-type-of-exp (cadr exp)))
