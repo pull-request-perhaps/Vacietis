@@ -95,7 +95,7 @@
                                &body body)
                 ;;(declare (ignore variable-declarations))
                 (dbg ".c:for...: ~S~%" (list variable-declarations initializations test step body))
-                `(progn
+                `(let* (,@variable-declarations)
                    ,initializations
                    (loop while ,test
                         ,@(when (and body (not (equal body '(nil)))) '(do))

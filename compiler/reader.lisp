@@ -820,7 +820,7 @@
            ,(let* ((*variable-declarations* ())
                    (*variable-lisp-type-declarations* ())
                    (body                    (read-c-block (next-char))))
-              `(prog* ,*variable-declarations*
+              `(prog* ,(reverse *variable-declarations*)
                   (declare ,@(remove-if #'null *variable-lisp-type-declarations*))
                   ,@body))))))
 
@@ -853,12 +853,19 @@
     (if (null (car dimensions))
         (remove-if #'null (get-elements base-type dimensions value))
         ;;(get-elements base-type dimensions value)
-        (let ((elements (get-elements base-type dimensions value)))
+        (let ((elements (get-elements base-type dimensions value))
+              (lisp-type (lisp-type-for base-type)))
           (dbg "making array of dimensions ~S~%" dimensions)
           (dbg "elements: ~S~%" elements)
-          (make-array dimensions
-                      :element-type (lisp-type-for base-type)
-                      :initial-contents elements)))))
+          (if (find-if-not #'(lambda (x) (typep x lisp-type)) elements)
+              (values `(make-array ',dimensions
+                                   :element-type ',lisp-type
+                                   :initial-contents (list ,@(map 'list #'identity elements)))
+                      dimensions)
+              (values (make-array dimensions
+                                  :element-type (lisp-type-for base-type)
+                                  :initial-contents elements)
+                      dimensions))))))
 
 ;; for an array of struct typed objects
 (defun pass2-struct-array (type array)
@@ -903,8 +910,9 @@
                                (setf init-size (length array))
                                array))
                          (progn
-                           (let ((array (to-lisp-array base-type name1 value)))
-                             (setf init-size (array-dimensions array))
+                           (multiple-value-bind (array dimensions)
+                               (to-lisp-array base-type name1 value)
+                             (setf init-size dimensions)
                              array))
                          #+nil ;; ...
                          (progn (setf init-size (length els))
@@ -967,11 +975,14 @@
                                    (compiler-state-var-types *compiler-state*)))
                  type)
            (if (boundp '*variable-declarations*)
-               (progn (push (list name (preallocated-value-exp-for type))
+               (progn (push `(,name ,@(if initial-value
+                                          (list initial-value)
+                                          (list (preallocated-value-exp-for type))))
                             *variable-declarations*)
                       (push (lisp-type-declaration-for type name)
                             *variable-lisp-type-declarations*)
                       (dbg "variable decl: ~S~%" (list type name (preallocated-value-exp-for type)))
+                      #+nil
                       (when initial-value
                         (push `(vacietis.c:= ,name ,initial-value)
                               decl-code)))

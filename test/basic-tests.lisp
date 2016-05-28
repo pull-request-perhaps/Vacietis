@@ -17,16 +17,41 @@ foobar;"
   10)
 
 (eval-test for-loop0
-  "int foobar;
+  "int foobar = 0;
 for (int x = 0, foobar = 0; x <= 10; x++) foobar += x;
 foobar;"
-   55) ;; comes out to 0 because of foobar scope, bug or feature? -> 55 now
+  0) ;; comes out to 0 because of foobar scope, bug or feature?
+;; gcc says 0 with -std=c99
+;; for.c: In function ‘main’:
+;; for.c:4:17: error: redefinition of ‘foobar’
+;; for (int x = 0, foobar = 0; x <= 10; x++) foobar += x;
+;;                 ^
+;; for.c:3:5: note: previous definition of ‘foobar’ was here
+;; int foobar = 0;
+;;     ^
+;; for.c:4:1: error: ‘for’ loop initial declarations are only allowed in C99 or C11 mode
+;;  for (int x = 0, foobar = 0; x <= 10; x++) foobar += x;
+;;  ^
+;; for.c:4:1: note: use option -std=c99, -std=gnu99, -std=c11 or -std=gnu11 to compile your code
+
+;;
 
 (eval-test for-loop1
   "int foobar = 0;
 for (int x = 0; x <= 10; x++) foobar += x;
 foobar;"
   55)
+
+(eval-test array-initializer1 "
+double
+main(void)
+{
+  double x = 0.5f;
+  double y[2] = {1.0, x};
+  return y[0]+y[1];
+}
+main();
+" 1.5)
 
 (eval-test string-literal
   "char foobar[] = \"foobar\";
