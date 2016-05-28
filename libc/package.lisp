@@ -1,6 +1,14 @@
 (in-package #:vacietis)
 (named-readtables:in-readtable vacietis:vacietis)
 
+(defpackage #:vacietis.libc
+  (:use #:cl #:named-readtables #:vacietis)
+  (:export
+   #:*runtime-init-hooks*
+   #:add-runtime-init-hook
+   #:runtime-init
+   ))
+
 (defpackage #:vacietis.libc.errno.h
   (:use #:cl #:named-readtables #:vacietis)
   (:import-from #:vacietis #:define)

@@ -9,23 +9,35 @@
   ((stream   :initarg  :stream  :accessor fd-stream)
    (feof     :initform 0        :accessor feof)
    (ferror   :initform 0        :accessor ferror)
+   (unread   :initform nil      :accessor unread)
    (tmp-file :initform nil      :accessor tmp-file)))
 
-(defvar stdin (make-instance 'FILE
-                             :stream (open "/dev/stdin"
-                                           :direction :output
-                                           :if-exists :append
-                                           :element-type '(unsigned-byte 8))))
-(defvar stdout (make-instance 'FILE
+(defvar stdin)
+(defvar stdout)
+(defvar stderr)
+
+(defun init-stdio ()
+  (setq stdin
+        (make-instance 'FILE
+                       :stream
+                       #+sbcl (sb-sys:make-fd-stream 0 :element-type '(unsigned-byte 8))
+                       #-sbcl
+                       (open "/dev/stdin"
+                             :direction :input
+                             :if-does-not-exist nil
+                             :element-type '(unsigned-byte 8))))
+  (setq stdout (make-instance 'FILE
                               :stream (open "/dev/stdout"
                                             :direction :output
                                             :if-exists :append
                                             :element-type '(unsigned-byte 8))))
-(defvar stderr (make-instance 'FILE
+  (setq stderr (make-instance 'FILE
                               :stream (open "/dev/stderr"
                                             :direction :output
                                             :if-exists :append
-                                            :element-type '(unsigned-byte 8))))
+                                            :element-type '(unsigned-byte 8)))))
+
+(vacietis.libc:add-runtime-init-hook #'init-stdio)
 
 (defun/1 clearerr (fd)
   (setf (feof fd)   0
@@ -118,8 +130,16 @@
 (defun c-read-char (stream)
   (read-byte stream))
 
+(defun %fgetc (fd)
+  (let ((it (unread fd)))
+    (if it
+        (progn (setf (unread fd) nil)
+               it)
+        (c-char-code (c-read-char (fd-stream fd))))))
+
 (defun/1 fgetc (fd)
-  (handler-case (c-char-code (c-read-char (fd-stream fd)))
+  (handler-case
+      (%fgetc fd)
     (end-of-file ()
       (setf (feof fd) 1)
       EOF)
@@ -164,14 +184,14 @@
 
 (defun fgets-is-dumb (str n fd replace-newline?)
   (handler-case
-      (let ((stream (fd-stream fd)))
+      (progn
         (loop for i from 0 below (1- n)
-              for x = (read-char stream)
-              do (progn (setf (aref str i) (char-code x))
-                        (when (eql x #\Newline)
-                          (unless replace-newline? (incf i))
-                          (loop-finish)))
-              finally (setf (aref str i) 0))
+           for x = (%fgetc fd)
+           do (progn (setf (aref str i) (c-char-code x))
+                     (when (eql x (char-code #\Newline))
+                       (unless replace-newline? (incf i))
+                       (loop-finish)))
+           finally (setf (aref str i) 0))
         str)
     (end-of-file ()
       (setf (feof fd) 1)
@@ -186,8 +206,12 @@
 (defun/1 gets (str)
   (fgets-is-dumb str most-positive-fixnum stdin t))
 
+(defun c-write-string (str stream)
+  (let ((seq (vacietis::ensure-sequence str)))
+    (write-sequence seq stream :end (position 0 seq))))
+
 (defun/1 fputs (str fd)
-  (handler-case (progn (write-string (char*-to-string str) (fd-stream fd))
+  (handler-case (progn (c-write-string str (fd-stream fd))
                        0)
     (error ()
       (setf (ferror fd) EIO)
@@ -201,7 +225,7 @@
   0)
 
 (defun/1 ungetc (c fd)
-  (handler-case (progn (unread-char (c-code-char c) (fd-stream fd))
+  (handler-case (progn (setf (unread fd) c)
                        c)
     (error ()
       (setf (ferror fd) EIO)
@@ -210,15 +234,46 @@
 ;;; fread/fwrite, only work for byte arrays for now
 
 (defun/1 fread (mem element_size count fd)
+  ;;(format t "fread ~S ~S ~S ~S~%" mem element_size count fd)
   (handler-case
-      (let* ((start    (memptr-ptr mem))
-             (end      (+ start (* element_size count)))
-             (position (read-sequence (memptr-mem mem) (fd-stream fd)
-                                      :start start :end end)))
-        (when (< position end)
-          (setf (feof fd) 1))
-        (- position start))
-    (error ()
+      (let* ((max (* element_size count))
+             (mem (vacietis::ensure-memptr mem))
+             (type (vacietis::memptr-type mem)))
+        ;;(format t "fread type: ~S~%" type)
+        (labels ((read-bytes ()
+                   (loop for i from 0 below max
+                      for x = (%fgetc fd)
+                      do (setf (aref (memptr-mem mem) i) (c-char-code x))
+                      finally (return i)))
+                 (read-ints (size-in-bytes)
+                   (let ((buffer (make-array size-in-bytes :element-type '(unsigned-byte 8)))
+                         (memi 0))
+                     (loop for i from 0 below max
+                        for x = (%fgetc fd) for bufi = (mod i size-in-bytes)
+                        do (progn
+                             (setf (aref buffer bufi) x)
+                             (setf (ldb (byte 8 (* 8 bufi)) (aref (memptr-mem mem) memi)) x)
+                             (when (= bufi (1- size-in-bytes))
+                               #+nil
+                               (format t (format nil "~~A -> ~~~D,'0X~~%" (* size-in-bytes 2))
+                                       (with-output-to-string (s)
+                                         (dotimes (z size-in-bytes)
+                                           (format s "~2,'0X" (aref buffer z))))
+                                       (aref (memptr-mem mem) memi))
+                               (incf memi)))
+                        finally (return i)))))
+          (let* ((n-read (cond
+                           ((or (eq (car type) 'signed-byte) (eq (car type) 'unsigned-byte))
+                            (if (eql 8 (cadr type))
+                                (read-bytes)
+                                (read-ints (vacietis.c:integer/ (cadr type) 8))))
+                           (t
+                            (error (format nil "unsupported type ~S" type))))))
+            (when (< n-read max)
+              (setf (feof fd) 1))
+            (vacietis.c:integer/ n-read element_size))))
+    (error (x)
+      (format t "fread io error: ~S~%" x)
       (setf (ferror fd) EIO)
       0)))
 
@@ -319,10 +374,10 @@
       (unless uppercase-hex?
         (string-downcase buffer))
       (with-padding (- width (+ val-len leading-0s))
-        (write-string sign stream)
+        (c-write-string sign stream)
         (loop repeat leading-0s			; This is how ANSI says to do this
               do (c-write-char #\0 stream))
-        (write-string buffer stream)))))
+        (c-write-string buffer stream)))))
 
 (defun zclib>print-flonum-1 (val precision uppercase-E-format? e-format)
   "Returns the printed flonum as a string. VAL is assumed to be non-negative."
@@ -350,7 +405,7 @@
       (cond (negative? (c-write-char #\-     stream))
             (always+-  (c-write-char #\+     stream))
             (spacep    (c-write-char #\Space stream)))
-      (write-string buffer stream))))
+      (c-write-string buffer stream))))
 
 (defun/1 fprintf (fd fmt &rest args)
   "Prints ARGS to FD according to FMT.
@@ -396,6 +451,8 @@
                (setf space-flag #\Space) (incf next-idx)) ; Skip ' '
              (when (= (char-code #\#) (aref fmt-array next-idx))
                (setf alternate-form t) (incf next-idx))	; Skip '#'
+             (when (= (char-code #\l) (aref fmt-array next-idx))
+               (incf next-idx))	; Skip 'l'
 
              ;; Get width, if present
              (if (= (char-code #\*) (aref fmt-array next-idx))
@@ -471,7 +528,7 @@
                     (unless (zerop (car args))
                       (c-write-char (c-code-char (pop args)) stream))))
                  (#\s
-                  (let* ((string (pop args))
+                  (let* ((string (vacietis::ensure-memptr (pop args)))
                          (length (min (or precision most-positive-fixnum)
                                       (vacietis.libc.string.h:strlen string))))
                     (with-padding (- width length)

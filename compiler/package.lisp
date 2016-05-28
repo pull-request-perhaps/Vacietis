@@ -27,7 +27,7 @@
 
 (in-package #:vacietis)
 
-(defparameter *debug* t)
+(defparameter *debug* nil)
 (defmacro dbg (&rest rest)
   `(when *debug*
      (format t ,@rest)))

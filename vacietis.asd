@@ -22,6 +22,7 @@
             :serial t
             :components
             ((:file "package")
+             (:file "libc")
              (:file "errno")
              (:file "stddef")
              (:file "stdarg")

@@ -84,6 +84,16 @@
   (typecase ptr
     (place-ptr ptr)
     (t (make-memptr :mem ptr))))
+(defun ensure-sequence (ptr)
+  (typecase ptr
+    (place-ptr
+     (let ((mem (place-ptr-variable ptr))
+           (offset (place-ptr-offset ptr)))
+       (if (= 0 offset)
+           mem
+           (subseq mem offset))))
+    (string (string-to-char* ptr))
+    (t ptr)))
 (defun allocate-memory (size)
   (make-memptr :mem (make-array size :adjustable t :initial-element 0)))
 
@@ -103,6 +113,10 @@
   (place-ptr-variable ptr))
 (defun memptr-ptr (ptr)
   (place-ptr-offset ptr))
+(defun memptr-type (ptr)
+  ;;(format t "memptr-type: ~S~%" ptr)
+  (let ((mem (ensure-memptr ptr)))
+    (array-element-type (memptr-mem ptr))))
 
 (defmacro vacietis.c:mkptr& (place) ;; need to deal w/function pointers
   (let ((new-value   (gensym))
