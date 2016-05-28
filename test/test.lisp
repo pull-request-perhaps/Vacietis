@@ -20,12 +20,15 @@
   (format t "Running basic tests:~&")
   (run! 'basic-tests))
 
+(defun run-program-tests ()
+  (format t "Running program tests:~&")
+  (run! 'program-tests))
+
 (defun run-tests ()
   (run-reader-tests)
   (run-pointer-tests)
   (run-basic-tests)
-  (format t "Running program tests:~&")
-  (run! 'program-tests))
+  (run-program-tests))
 
 (defmacro reader-test (name input &rest s-exps)
   `(test ,name
@@ -51,6 +54,14 @@
                    (lambda ()
                      (eval (vacietis::cstr ,input))))))))
 
+(defvar *test-dir*
+  (asdf:system-relative-pathname :vacietis "test/"))
+
+(defmacro test-dir ()
+  *test-dir*
+  #+nil
+  (directory-namestring (or *load-truename* *compile-file-truename*)))
+
 (defmacro program-test (name &key return-code input output)
   `(test ,name
      (do-with-temp-c-package ',name
@@ -58,17 +69,27 @@
          (load-c-file
           (merge-pathnames
            (format nil "programs/~(~A~)/main.c" ',name)
-           (directory-namestring #.(or *compile-file-truename* *load-truename*))))
+           (test-dir)))
          (let* ((test-output-stream (when ,output
+                                      (make-instance 'fast-io:fast-output-stream
+                                                     :buffer (fast-io:make-output-buffer))
+                                      #+nil
                                       (make-string-output-stream)))
                 (result (run-c-program
                          *package*
                          :stdin (when ,input
+                                  (make-instance 'fast-io:fast-input-stream
+                                                 :buffer (fast-io:make-input-buffer
+                                                          :vector (vacietis:string-to-unsigned-char* ,input)))
+                                  #+nil
                                   (make-string-input-stream ,input))
                          :stdout test-output-stream)))
            (declare (ignorable result))
            (when ,return-code
              (is (equal ,return-code result)))
            (when ,output
-             (is (equal ,output (get-output-stream-string
-                                 test-output-stream)))))))))
+             (is (equal (vacietis:char*-to-string (vacietis:string-to-unsigned-char* ,output))
+                        (vacietis:char*-to-string (fast-io:finish-output-stream test-output-stream))
+                        #+nil
+                        (get-output-stream-string
+                         test-output-stream)))))))))

@@ -214,7 +214,7 @@
   (fgets-is-dumb str most-positive-fixnum stdin t))
 
 (defun c-write-string (str stream)
-  (let ((seq (vacietis::ensure-sequence str)))
+  (let ((seq (vacietis::ensure-unsigned-sequence str)))
     (write-sequence seq stream :end (position 0 seq))))
 
 (defun/1 fputs (str fd)
@@ -280,15 +280,16 @@
               (setf (feof fd) 1))
             (vacietis.c:integer/ n-read element_size))))
     (error (x)
-      (format t "fread io error: ~S~%" x)
+      ;;(format t "fread io error: ~S~%" x)
       (setf (ferror fd) EIO)
       0)))
 
 (defun/1 fwrite (mem element_size count fd)
   (handler-case
       (let* ((mem (vacietis::ensure-memptr mem))
-             (start (memptr-ptr mem)))
-        (write-sequence (memptr-mem mem) (fd-stream fd)
+             (start (memptr-ptr mem))
+             (seq (vacietis::ensure-unsigned-sequence mem)))
+        (write-sequence seq (fd-stream fd)
                         :start start :end (+ start (* element_size count)))
         (force-output (fd-stream fd))
         count)
@@ -436,6 +437,7 @@
    field; if a zero appears before <width>, padding will be done with zeros instead
    of blanks.  An `l' before <conv> is ignored, as is the case of <conv>."
   (let* ((fmt (vacietis::ensure-memptr fmt))
+         ;;(__ (format t "fmt memptr: ~S~%" fmt))
          (fmt-array (memptr-mem fmt))
          (stream    (fd-stream fd)))
     (do ((fmt-index (memptr-ptr fmt) (1+ fmt-index)))
@@ -550,6 +552,7 @@
             (c-write-char (c-code-char ch) stream))))))
 
 (defun/1 printf (fmt &rest args)
+  ;;(format t "printf: ~S~%" (vacietis:char*-to-string fmt))
   (apply #'fprintf stdout fmt args))
 
 (defun/1 sprintf (str fmt &rest args)

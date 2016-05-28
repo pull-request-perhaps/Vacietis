@@ -69,10 +69,19 @@
                                                     unicode)
                                                #(0)))))
 
+(defun string-to-unsigned-char* (string)
+  (let ((unicode (babel:string-to-octets string :encoding :utf-8)))
+    (make-array (1+ (length unicode))
+                :element-type '(unsigned-byte 8)
+                :initial-contents (concatenate '(simple-array (unsigned-byte 8) (*))
+                                               unicode
+                                               #(0)))))
+
 (defun char*-to-string (char*)
-  (let* ((mem        (memptr-mem char*))
+  (let* ((char*      (ensure-memptr char*))
+         (mem        (memptr-mem char*))
          (start      (memptr-ptr char*))
-         (end        (position 0 mem :start start))
+         (end        (or (position 0 mem :start start) (length mem)))
          (byte-array (make-array (- end start) :element-type '(unsigned-byte 8))))
     (replace byte-array mem :start2 start :end2 end)
     (babel:octets-to-string byte-array :encoding :utf-8)))
@@ -84,16 +93,29 @@
   (typecase ptr
     (place-ptr ptr)
     (t (make-memptr :mem ptr))))
-(defun ensure-sequence (ptr)
-  (typecase ptr
-    (place-ptr
-     (let ((mem (place-ptr-variable ptr))
-           (offset (place-ptr-offset ptr)))
-       (if (= 0 offset)
-           mem
-           (subseq mem offset))))
-    (string (string-to-char* ptr))
-    (t ptr)))
+(defun ensure-unsigned-sequence (ptr)
+  (let ((seq
+         (typecase ptr
+           (place-ptr
+            (let ((mem (place-ptr-variable ptr))
+                  (offset (place-ptr-offset ptr)))
+              (if (= 0 offset)
+                  mem
+                  (subseq mem offset))))
+           (string (string-to-unsigned-char* ptr))
+           (t ptr))))
+    (let ((element-type (array-element-type seq)))
+      (if (equal element-type '(unsigned-byte 8))
+          seq
+          (make-array (length seq)
+                      :element-type '(unsigned-byte 8)
+                      :initial-contents (map 'vector
+                                             (lambda (c)
+                                               (if (< c 0)
+                                                   (+ 127 (- c))
+                                                   c))
+                                             seq))))))
+
 (defun allocate-memory (size)
   (make-memptr :mem (make-array size :adjustable t :initial-element 0)))
 

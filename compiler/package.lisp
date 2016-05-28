@@ -16,6 +16,7 @@
 
    ;; utilities
    #:string-to-char*
+   #:string-to-unsigned-char*
    #:char*-to-string
 
    ;; runtime

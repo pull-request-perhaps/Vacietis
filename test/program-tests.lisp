@@ -18,7 +18,8 @@
 
 (program-test different-comment-styles :return-code 9)
 
-(program-test hello-world0 :output "hello world")
+(program-test hello-world0 :output "hello world
+")
 
 (program-test hello-world :output "hello world
 ")
@@ -30,6 +31,7 @@
 I am 72 inches tall.
 ")
 
+#+nil
 (program-test kr-echo :input "foobar" :output "foobar")
 
 (program-test hanly-83

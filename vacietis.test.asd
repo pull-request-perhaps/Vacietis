@@ -12,4 +12,4 @@
                          (:file "pointer-tests")
                          (:file "basic-tests")
                          (:file "program-tests"))))
-  :depends-on (:vacietis :eos))
+  :depends-on (:vacietis :eos :fast-io))
