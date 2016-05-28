@@ -107,11 +107,20 @@
       (when (vectorp type)
         (let* ((length (length type))
                (name (aref type (1- length))))
-          (if (= length 2)
-              (lisp-type-declaration-for (aref type 0) name)
-              (when (eq (aref type 1) 'vacietis.c:*)
-                `(type (or place-ptr
-                           (simple-array ,(lisp-type-for (aref type 0)) ,(make-list (- length 2) :initial-element '*))) ,name)))))))
+          (cond
+            ((= length 2)
+             (lisp-type-declaration-for (aref type 0) name))
+            ((and (= length 3) (equalp #() (aref type 2)))
+             (dbg "function pointer: ~S~%" type)
+             ;; #(vacietis.c:int #(vacietis.c:* getfn) #())
+             ;; XXX what about pointers to function points?
+             (let ((name (aref (aref type 1) 1)))
+               `(type (or function symbol integer place-ptr nil) ,name)))
+            (t
+             (when (eq (aref type 1) 'vacietis.c:*)
+               `(type (or
+                       ;;place-ptr t ;; XXX
+                       (simple-array ,(lisp-type-for (aref type 0)) ,(make-list (- length 2) :initial-element '*))) ,name))))))))
 
 (defun lisp-constant-value-for (type constant)
   (cond

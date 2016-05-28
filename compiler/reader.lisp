@@ -439,7 +439,16 @@
                   (when type
                     ;; should be array-type
                     (when (array-type-p type)
-                      (array-type-element-type type))))))
+                      (array-type-element-type type)))))
+               ((member (car exp) (mapcar #'(lambda (x) (intern (string-upcase x) :vacietis.c))
+                                          '(&& |\|\|| < <= > >= == != ptr< ptr<= ptr> ptr>= ptr== ptr!=)))
+                nil)
+               ((member (car exp) '(- + * /))
+                (c-type-of-exp (cadr exp)))
+               (t
+                ;; function
+                ;; XXX
+                'vacietis.c:int))
              (c-type-of exp))))
     (dbg "c-type-of-exp ~S: ~S~%" exp type)
     type))
@@ -488,7 +497,8 @@
                                        (c-type-of-exp lvalue base-type)))
                            (r-c-type (c-type-of-exp rvalue))
                            (op (or op (aref exp i))))
-                       (dbg "  -> type of ~S is: ~S~%" lvalue c-type)
+                       (dbg "  -> type of lvalue ~S is: ~S~%" lvalue c-type)
+                       (dbg "  -> type of rvalue ~S is: ~S~%" rvalue r-c-type)
                        (when (member op '(vacietis.c:|\|\|| vacietis.c:&&))
                          (when (integer-type? (c-type-of-exp lvalue))
                            (setq lvalue `(not (eql 0 ,lvalue))))
@@ -496,11 +506,6 @@
                            (setq rvalue `(not (eql 0 ,rvalue)))))
                        (list (let ()
                                (cond
-                                 ((integer-type? c-type)
-                                  (case op
-                                    ('vacietis.c:/ 'vacietis.c:integer/)
-                                    ('vacietis.c:/= 'vacietis.c:integer/=)
-                                    (t op)))
                                  ((and (pointer-to-p c-type)
                                        (or (not (listp lvalue))
                                            (not (eq 'vacietis.c:deref* (car lvalue)))))
@@ -520,6 +525,11 @@
                                   (case op
                                     ('vacietis.c:+ 'vacietis.c:ptr+)
                                     (t op)))
+                                 ((integer-type? c-type)
+                                  (case op
+                                    ('vacietis.c:/ 'vacietis.c:integer/)
+                                    ('vacietis.c:/= 'vacietis.c:integer/=)
+                                    (t op)))
                                  (t op)))
                              lvalue
                              (if (and (constantp rvalue) (numberp rvalue))
@@ -536,12 +546,21 @@
           (awhen (position 'vacietis.c:? exp :start start :end end)
             (let ((?pos it))
               (return
-                `(if ,(parse-infix exp start ?pos)
-                     ,@(aif (position 'vacietis.c:|:| exp :start ?pos :end end)
-                            (list (parse-infix exp (1+ ?pos) it)
-                                  (parse-infix exp (1+ it)   end))
-                            (read-error "Error parsing ?: trinary operator in: ~A"
-                                        (subseq exp start end)))))))
+                (let* ((test (parse-infix exp start ?pos))
+                       (test-type  (c-type-of-exp test))
+                       (testsym (gensym)))
+                  `(let ((,testsym ,test))
+                     (if ,(cond
+                           ((eq 'function test-type)
+                            `(and ,testsym (not (eql 0 ,testsym))))
+                           ((eq 'vacietis.c:int test-type)
+                            `(not (eql 0 ,testsym)))
+                           (t testsym))
+                         ,@(aif (position 'vacietis.c:|:| exp :start ?pos :end end)
+                                (list (parse-infix exp (1+ ?pos) it)
+                                      (parse-infix exp (1+ it)   end))
+                                (read-error "Error parsing ?: trinary operator in: ~A"
+                                            (subseq exp start end)))))))))
           ;; various binary operators
           (loop for table across *binary-ops-table* do
                (awhen (match-binary-ops table)
@@ -600,12 +619,21 @@
                                   (setf type-exp (aref type-exp 0)))
                                 (or (size-of type-exp)
                                     (read-error "Don't know sizeof ~A" type-exp)))
-                              (list (case x
-                                      (vacietis.c:- '-)
-                                      (vacietis.c:* 'vacietis.c:deref*)
-                                      (vacietis.c:& 'vacietis.c:mkptr&)
-                                      (otherwise     x))
-                                    (parse-rest i))))))))
+                              (let ((rest (parse-rest i)))
+                                (cond
+                                  ((eq x 'vacietis.c:!)
+                                   (if (integer-type? (c-type-of-exp rest))
+                                       `(if (eql 0 ,rest)
+                                            1
+                                            0)
+                                       `(vacietis.c:! ,rest)))
+                                  (t
+                                   (list (case x
+                                           (vacietis.c:- '-)
+                                           (vacietis.c:* 'vacietis.c:deref*)
+                                           (vacietis.c:& 'vacietis.c:mkptr&)
+                                           (otherwise     x))
+                                         rest))))))))))
           ;; funcall, aref, and struct access
           (loop for i from (1- end) downto (1+ start) for x = (aref exp i) do
                (cond
@@ -694,6 +722,7 @@
                  (read-c-statement next-char)))))
     (if (eq statement 'vacietis.c:if)
         (let* ((test       (parse-infix (next-exp)))
+               (test-type  (c-type-of-exp test))
                (then       (read-block-or-statement))
                (next-char  (next-char nil))
                (next-token (case next-char
@@ -701,7 +730,14 @@
                              ((nil))
                              (t    (c-unread-char next-char) nil)))
                (if-exp    (cond
-                            ((eq 'vacietis.c:int (c-type-of-exp test))
+                            ((eq 'function test-type)
+                             (let ((testsym (gensym)))
+                               `(let ((,testsym ,test))
+                                  (if (and ,testsym (not (eql 0 ,testsym)))
+                                      ,then
+                                      ,(when (eq next-token 'vacietis.c:else)
+                                             (read-block-or-statement))))))
+                            ((integer-type? test-type)
                              `(if (not (eql 0 ,test))
                                     ,then
                                     ,(when (eq next-token 'vacietis.c:else)
@@ -807,6 +843,8 @@
                                   "Junk in argument list: ~A" x)))))
                  (when (and (vectorp param) (c-type? (aref param 0)))
                    (dbg "  param: ~S~%" param)
+                   (when (and (= (length param) 3) (equalp #() (aref param 2)))
+                     (setq arg-type 'function))
                    (push (lisp-type-declaration-for param)
                          arglist-type-declarations))
                  (loop for x across param do
@@ -815,11 +853,6 @@
                          (progn (push '&rest            arglist)
                                 (push 'vacietis.c:|...| arglist)
                                 (return-from done-arglist)))
-                        #+nil
-                        ((eq x t)
-                         (let ((x '__c_t))
-                           (setf (gethash x *local-var-types*) arg-type)
-                           (push x arglist)))
                         ((eq 'vacietis.c:* x)
                          (incf ptrlev))
                         ((not (or (c-type? x) (eq 'vacietis.c:* x)))
@@ -963,7 +996,7 @@
                           (setq initial-value `(vacietis.c:mkptr& (aref ,initial-value 0))))
                         (parse-declaration name))
                        (t (read-error "Unknown thing in declaration ~A" x)))))))
-      (dbg "spec: ~S~%" spec)
+      ;;(dbg "spec: ~S~%" spec)
       (parse-declaration spec)
       (values name type initial-value))))
 

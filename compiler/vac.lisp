@@ -61,6 +61,10 @@
                   `(tagbody ,@new-body)))
               (vacietis.c:! (a)
                 `(not ,a))
+              (vacietis.c:!= (a b)
+                `(not (eql ,a ,b)))
+              (vacietis.c:== (a b)
+                `(eql ,a ,b))
               (vacietis.c:&& (a b)
                 `(and ,a ,b))
               (vacietis.c:|\|\|| (a b)
@@ -89,18 +93,22 @@
               (vacietis:allocate-memory (size)
                 `(make-array ,size :element-type 'double-float))
               (vacietis.c:for ((variable-declarations
-                                initializations
+                                initialization
                                 test
                                 step)
                                &body body)
-                ;;(declare (ignore variable-declarations))
-                (dbg ".c:for...: ~S~%" (list variable-declarations initializations test step body))
+                (dbg ".c:for...: ~S~%" (list variable-declarations initialization test step body))
                 `(let* (,@variable-declarations)
-                   ,initializations
-                   (loop while ,test
-                        ,@(when (and body (not (equal body '(nil)))) '(do))
-                        ,@(when (and body (not (equal body '(nil)))) body)
-                        ,@(when step (list step))))))
+                   (vacietis::do-tagbody
+                       ,@(awhen initialization (list it))
+                     for-loop-label
+                     (when (not ,test)
+                       (go vacietis.c:break))
+                     ,@(when (and body (not (equal body '(nil)))) body)
+                     vacietis.c:continue
+                     ,@(awhen step (list it))
+                     (go for-loop-label)
+                     vacietis.c:break))))
      ,@body))
 
 
@@ -109,7 +117,7 @@
   `(vac-override
     (let ((expanded-body (macroexpansion-of ,body)))
       (dbg "expanded-body: ~S~%" expanded-body)
-      (eval (append nil expanded-body)))))
+      (eval expanded-body))))
 
 
 (defmacro vac-defun/1 (name arglist &body body)
@@ -130,5 +138,6 @@
          (eval (append nil (list 'defun ',name ',arglist
                                  '(declare (optimize (speed 3) (debug 0) (safety 0)))
                                  ;;'(declare (optimize (speed 3)))
+                                 ;;'(declare (optimize (debug 3)))
                                  (when ',declarations ',@declarations)
                                  expanded-body)))))))

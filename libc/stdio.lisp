@@ -577,6 +577,7 @@
 ;;; scanf
 
 (load-libc-file "scanf.c" #.(libc-dir))
+(vacietis::unconditionally-load-libc-file "scanf.c" #.(libc-dir))
 
 ;;; things that have no effect
 

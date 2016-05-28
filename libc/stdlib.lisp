@@ -52,15 +52,16 @@
          (start (position-if (lambda (c)
                                (not (find c '(#\Space #\Tab #\Newline))))
                              str)))
-    (read-from-string
-     str
-     nil
-     nil
-     :start start
-     :end   (position-if (lambda (c)
-                           (not (find c ".0123456789+-eE")))
-                         str
-                         :start start))))
+    (coerce (read-from-string
+             str
+             nil
+             nil
+             :start start
+             :end   (position-if (lambda (c)
+                                   (not (find c ".0123456789+-eE")))
+                                 str
+                                 :start start))
+            'double-float)))
 
 (defun/1 strtod (str end-ptr)
   (multiple-value-bind (number end)

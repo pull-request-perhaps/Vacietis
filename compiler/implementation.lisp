@@ -144,8 +144,9 @@
   (let ((new-value   (gensym))
         (place       (macroexpand place)))
     (dbg "mkptr& place: ~S~%" place)
-    ;; XXX assume aref/svref etc.
     (cond
+      ((null place)
+       nil)
       ((and (listp place)
             (member (car place) '(aref vacietis.c:[])))
        (let* ((variable (second place))
@@ -162,13 +163,17 @@
                     :offset ,initial-offset
                     :variable ,varsym)))))))
       (t
-       `(make-place-ptr
-         :offset nil
-         :variable nil
-         :%closure (lambda (&optional ,new-value)
-                     (if ,new-value
-                         (setf ,place ,new-value)
-                         ,place)))))))
+       (let ((varsym (gensym)))
+         `(progn
+            (let ((,varsym ,place))
+              (dbg "%closure making place ptr to ~S(~S)~%" ',place ,varsym)
+              (make-place-ptr
+               :offset nil
+               :variable nil
+               :%closure (lambda (&optional ,new-value)
+                           (if ,new-value
+                               (setf ,place ,new-value)
+                               ,place))))))))))
 
 (defun %ptr+ (ptr x)
   ;;(dbg "%ptr+: ~S ~S~%" ptr x)
@@ -211,14 +216,20 @@
        (- ptr-offset (place-ptr-offset x))))
     (t (%ptr+ ptr (- x)))))
 
+(defun ensure-place-ptr-offset (x)
+  (typecase x
+    (place-ptr (place-ptr-offset x))
+    (t 0)))
+
 (defun %ptr< (x y)
-  (< (place-ptr-offset x) (place-ptr-offset y)))
+  (dbg "%ptr< ~S ~S~%" x y)
+  (< (ensure-place-ptr-offset x) (ensure-place-ptr-offset y)))
 (defun %ptr<= (x y)
-  (<= (place-ptr-offset x) (place-ptr-offset y)))
+  (<= (ensure-place-ptr-offset x) (ensure-place-ptr-offset y)))
 (defun %ptr> (x y)
-  (> (place-ptr-offset x) (place-ptr-offset y)))
+  (> (ensure-place-ptr-offset x) (ensure-place-ptr-offset y)))
 (defun %ptr>= (x y)
-  (>= (place-ptr-offset x) (place-ptr-offset y)))
+  (>= (ensure-place-ptr-offset x) (ensure-place-ptr-offset y)))
 (defun %ptr== (x y)
   (and (eq (place-ptr-variable x) (place-ptr-variable y))
        (= (place-ptr-offset x) (place-ptr-offset y))))

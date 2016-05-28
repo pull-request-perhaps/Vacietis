@@ -31,7 +31,6 @@
 I am 72 inches tall.
 ")
 
-#+nil
 (program-test kr-echo :input "foobar" :output "foobar")
 
 (program-test hanly-83

@@ -78,9 +78,11 @@
                 (result (run-c-program
                          *package*
                          :stdin (when ,input
-                                  (make-instance 'fast-io:fast-input-stream
-                                                 :buffer (fast-io:make-input-buffer
-                                                          :vector (vacietis:string-to-unsigned-char* ,input)))
+                                  (let ((input-stream (make-instance 'fast-io:fast-input-stream)))
+                                    (setf (slot-value input-stream 'fast-io::buffer)
+                                          (fast-io:make-input-buffer
+                                           :vector (vacietis:string-to-unsigned-char* ,input)))
+                                    input-stream)
                                   #+nil
                                   (make-string-input-stream ,input))
                          :stdout test-output-stream)))
