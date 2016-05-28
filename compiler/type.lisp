@@ -8,6 +8,9 @@
 
 (cl:in-package #:vacietis)
 
+(defstruct c-function
+  return-type)
+
 (defstruct c-type)
 
 (defstruct (pointer-to (:include c-type))

@@ -50,12 +50,6 @@
 
 ;;; pointers, storage units and allocation
 
-
-#+nil
-(defstruct memptr
-  mem
-  (ptr 0))
-
 (defun string-to-char* (string)
   (let ((unicode (babel:string-to-octets string :encoding :utf-8)))
     (make-array (1+ (length unicode))
@@ -219,14 +213,19 @@
            (make-place-ptr :offset offset
                            :variable ptr))))))
 
-(defun %ptr- (ptr x)
-  (typecase x
-    (place-ptr
-     (let ((ptr-offset (typecase ptr
-                         (place-ptr (place-ptr-offset ptr))
-                         (t 0))))
-       (- ptr-offset (place-ptr-offset x))))
-    (t (%ptr+ ptr (- x)))))
+(defun %ptr- (x y)
+  (cond
+    ((and (or (place-ptr-p x) (typep x 'simple-array))
+          (or (place-ptr-p y) (typep y 'simple-array)))
+     (- (ensure-place-ptr-offset x) (ensure-place-ptr-offset y)))
+    (t
+     (typecase y
+       (place-ptr
+        (let ((ptr-offset (typecase x
+                            (place-ptr (place-ptr-offset x))
+                            (t 0))))
+          (- ptr-offset (place-ptr-offset y))))
+       (t (%ptr+ x (- y)))))))
 
 (defun %ptr< (x y)
   (dbg "%ptr< ~S ~S~%" x y)
@@ -246,13 +245,12 @@
 (defun vacietis.c:deref* (ptr)
   ;;(dbg "deref*: ~S~%" ptr)
   (etypecase ptr
-    ;;(memptr    (aref (memptr-mem ptr) (memptr-ptr ptr)))
     (place-ptr (place-ptr-closure ptr))
-    (simple-array (aref ptr 0))))
+    (simple-array (aref ptr 0))
+    (function ptr)))
 
 (defun (setf vacietis.c:deref*) (new-value ptr)
   (etypecase ptr
-    ;;(memptr    (setf (aref (memptr-mem ptr) (memptr-ptr ptr)) new-value))
     (place-ptr (setf (place-ptr-closure ptr) new-value))
     (simple-array (setf (aref ptr 0) new-value))))
 

@@ -9,4 +9,5 @@
   (structs   (make-hash-table))
   (accessors (make-hash-table :test #'equal))
   (enums     (make-hash-table))
+  (functions (make-hash-table))
   (var-types (make-hash-table)))

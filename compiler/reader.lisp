@@ -391,16 +391,19 @@
                                 (compiler-state-var-types *compiler-state*))))))
 
 (defun c-type-of (x)
+  ;;(maphash #'(lambda (k v) (dbg "  func: ~S: ~S~%" k v)) (compiler-state-functions *compiler-state*))
   (if (and (constantp x) (numberp x))
       (typecase x
         (double-float 'vacietis.c:double)
         (single-float 'vacietis.c:float)
         (t 'vacietis.c:int))
       (or (when *local-var-types*
-            (dbg "c-type-of ~S~%" x)
-            (maphash #'(lambda (k v) (dbg "  ~S: ~S~%" k v)) *local-var-types*)
+            ;;(dbg "c-type-of ~S~%" x)
+            ;;(maphash #'(lambda (k v) (dbg "  ~S: ~S~%" k v)) *local-var-types*)
             (gethash x *local-var-types*))
-          (gethash x (compiler-state-var-types *compiler-state*)))))
+          (gethash x (compiler-state-var-types *compiler-state*))
+          (when (gethash x (compiler-state-functions *compiler-state*))
+            'function))))
 
 (defun c-type-of-exp (exp &optional base-type)
   ;;(when *local-var-types* (maphash #'(lambda (k v) (dbg "  ~S: ~S~%" k v)) *local-var-types*))
@@ -445,6 +448,8 @@
                 nil)
                ((member (car exp) '(- + * /))
                 (c-type-of-exp (cadr exp)))
+               ((gethash (car exp) (compiler-state-functions *compiler-state*))
+                (c-function-return-type (gethash (car exp) (compiler-state-functions *compiler-state*))))
                (t
                 ;; function
                 ;; XXX
@@ -476,7 +481,7 @@
           (return (parse-infix (aref exp start))))
         (labels ((cast? (x)
                    (and (vectorp x)
-                        (not (find 'vacietis.c:|,| x)) ;;; casts can't contain commas, can they?
+                        (not (find 'vacietis.c:|,| x)) ;;; casts can't contain commas, can they? function prototypes?
                         (some #'c-type? x)))
                  (match-binary-ops (table &key (lassoc t))
                    ;;(dbg "match-binary-ops: ~S   ~S ~S~%" table (1+ start) (1- end))
@@ -551,7 +556,7 @@
                        (testsym (gensym)))
                   `(let ((,testsym ,test))
                      (if ,(cond
-                           ((eq 'function test-type)
+                           ((eq 'function-pointer test-type)
                             `(and ,testsym (not (eql 0 ,testsym))))
                            ((eq 'vacietis.c:int test-type)
                             `(not (eql 0 ,testsym)))
@@ -655,6 +660,7 @@
                                         ,(parse-infix (second x)))
                         (read-error "Unexpected list when parsing ~A" exp))))
                  ((vectorp x) ;; funcall
+                  (dbg "funcall: ~S~%" x)
                   (return-from parse-infix
                     (let ((fun-exp (parse-infix exp start i)))
                      (append
@@ -667,7 +673,13 @@
                               collect (parse-infix x xstart (or next (length x)))
                             while next do (setf xstart (1+ next)))))))))
           (read-error "Error parsing expression: ~A" (subseq exp start end))))
-      exp))
+      (progn
+        (let ((type (c-type-of-exp exp)))
+          (dbg "type of ~S: ~S~%" exp (c-type-of-exp exp))
+          (case type
+            ('function
+             `(fdefinition ',exp))
+            (t exp))))))
 
 ;;; statements
 
@@ -810,7 +822,7 @@
                ,(read-block-or-statement)))))))
 
 (defun read-function (name result-type)
-  (declare (ignore result-type))
+  ;;(declare (ignore result-type))
   (let (arglist
         arglist-type-declarations
         (*function-name* name)
@@ -844,7 +856,7 @@
                  (when (and (vectorp param) (c-type? (aref param 0)))
                    (dbg "  param: ~S~%" param)
                    (when (and (= (length param) 3) (equalp #() (aref param 2)))
-                     (setq arg-type 'function))
+                     (setq arg-type 'function-pointer))
                    (push (lisp-type-declaration-for param)
                          arglist-type-declarations))
                  (loop for x across param do
@@ -859,14 +871,23 @@
                          (strip-type x)))))))))
     (if (eql (peek-char nil %in) #\;)
         (prog1 t (c-read-char)) ;; forward declaration
-        `(vac-defun/1 ,name ,(reverse arglist)
-           (declare ,@(remove-if #'null arglist-type-declarations))
-           ,(let* ((*variable-declarations* ())
-                   (*variable-lisp-type-declarations* ())
-                   (body                    (read-c-block (next-char))))
-              `(prog* ,(reverse *variable-declarations*)
-                  (declare ,@(remove-if #'null *variable-lisp-type-declarations*))
-                  ,@body))))))
+        (let ((ftype `(ftype (function ,(make-list (length arglist) :initial-element '*) ,(lisp-type-for result-type)) ,name)))
+          (when (find '&rest arglist)
+            (setq ftype nil))
+          (dbg "result type of ~S: ~S~%" name result-type)
+          (dbg "ftype: ~S~%" ftype)
+          (setf (gethash name (compiler-state-functions *compiler-state*))
+                (make-c-function :return-type result-type))
+          `(progn
+             ,@(when ftype (list `(declaim ,ftype)))
+             (vac-defun/1 ,name ,(reverse arglist)
+               (declare ,@(remove-if #'null arglist-type-declarations))
+               ,(let* ((*variable-declarations* ())
+                       (*variable-lisp-type-declarations* ())
+                       (body                    (read-c-block (next-char))))
+                      `(prog* ,(reverse *variable-declarations*)
+                          (declare ,@(remove-if #'null *variable-lisp-type-declarations*))
+                          ,@body))))))))
 
 (defun get-dimensions (name1 &optional dimensions)
   (dbg "get-dimensions name1: ~S~%" name1)

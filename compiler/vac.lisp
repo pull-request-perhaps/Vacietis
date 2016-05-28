@@ -90,8 +90,6 @@
               (vacietis.c:|.|
                 (struct-var slot-index)
                 `(aref ,struct-var ,slot-index))
-              (vacietis:allocate-memory (size)
-                `(make-array ,size :element-type 'double-float))
               (vacietis.c:for ((variable-declarations
                                 initialization
                                 test

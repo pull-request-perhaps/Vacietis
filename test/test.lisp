@@ -48,7 +48,6 @@
   `(test ,name
      (is (equalp ,(if (stringp result)
                       `(string-to-char* ,result)
-                      ;;`(vacietis.c:mkptr& (aref (string-to-char* ,result) 0))
                       result)
                  (do-with-temp-c-package ',name
                    (lambda ()
@@ -70,28 +69,21 @@
           (merge-pathnames
            (format nil "programs/~(~A~)/main.c" ',name)
            (test-dir)))
-         (let* ((test-output-stream (when ,output
-                                      (make-instance 'fast-io:fast-output-stream
-                                                     :buffer (fast-io:make-output-buffer))
-                                      #+nil
-                                      (make-string-output-stream)))
+         (let* ((test-output-stream ,(when output
+                                           `(make-instance 'fast-io:fast-output-stream
+                                                           :buffer (fast-io:make-output-buffer))))
                 (result (run-c-program
                          *package*
-                         :stdin (when ,input
-                                  (let ((input-stream (make-instance 'fast-io:fast-input-stream)))
-                                    (setf (slot-value input-stream 'fast-io::buffer)
-                                          (fast-io:make-input-buffer
-                                           :vector (vacietis:string-to-unsigned-char* ,input)))
-                                    input-stream)
-                                  #+nil
-                                  (make-string-input-stream ,input))
+                         :stdin ,(when input
+                                  `(let ((input-stream (make-instance 'fast-io:fast-input-stream)))
+                                     (setf (slot-value input-stream 'fast-io::buffer)
+                                           (fast-io:make-input-buffer
+                                            :vector (vacietis:string-to-unsigned-char* ,input)))
+                                     input-stream))
                          :stdout test-output-stream)))
            (declare (ignorable result))
-           (when ,return-code
-             (is (equal ,return-code result)))
-           (when ,output
-             (is (equal (vacietis:char*-to-string (vacietis:string-to-unsigned-char* ,output))
-                        (vacietis:char*-to-string (fast-io:finish-output-stream test-output-stream))
-                        #+nil
-                        (get-output-stream-string
-                         test-output-stream)))))))))
+           ,(when return-code
+                  `(is (equal ,return-code result)))
+           ,(when output
+                  `(is (equal (vacietis:char*-to-string (vacietis:string-to-unsigned-char* ,output))
+                              (vacietis:char*-to-string (fast-io:finish-output-stream test-output-stream))))))))))
