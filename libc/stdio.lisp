@@ -47,17 +47,24 @@
 
 ;; have to do something about EEXIST
 (defun open-stream (filename mode)
-  (let* ((m (char*-to-string mode))
-         (opts (cond ((string= m "r") '(:direction :input))
+  (let* ((m (let ((m (char*-to-string mode)))
+              (cl:remove #\b m)))
+         (opts (cond ((string= m "r") '(:direction :input
+                                        :element-type (unsigned-byte 8)))
                      ((string= m "w") '(:direction :output :if-exists :overwrite
-                                        :if-does-not-exist :create))
+                                        :if-does-not-exist :create
+                                        :element-type (unsigned-byte 8)))
                      ((string= m "a") '(:direction :output :if-exists :append
-                                        :if-does-not-exist :create))
-                     ((string= m "r+") '(:direction :io))
+                                        :if-does-not-exist :create
+                                        :element-type (unsigned-byte 8)))
+                     ((string= m "r+") '(:direction :io
+                                         :element-type (unsigned-byte 8)))
                      ((string= m "w+") '(:direction :io :if-exists :overwrite
-                                        :if-does-not-exist :create))
+                                         :if-does-not-exist :create
+                                         :element-type (unsigned-byte 8)))
                      ((string= m "a+") '(:direction :io :if-exists :append
-                                         :if-does-not-exist :create)))))
+                                         :if-does-not-exist :create
+                                         :element-type (unsigned-byte 8))))))
     (apply #'open (char*-to-string filename) opts)))
 
 (defun/1 fopen (filename mode)
@@ -279,8 +286,7 @@
             (when (< n-read max)
               (setf (feof fd) 1))
             (vacietis.c:integer/ n-read element_size))))
-    (error (x)
-      ;;(format t "fread io error: ~S~%" x)
+    (error ()
       (setf (ferror fd) EIO)
       0)))
 
