@@ -152,16 +152,18 @@
        (let* ((variable (second place))
               (initial-offset (third place))
               (varsym (gensym)))
-         `(progn
-            (let ((,varsym ,variable))
-              (dbg "making place ptr to ~S(~S) ~S~%" ',variable ,varsym (place-ptr-p ,varsym))
-              (typecase ,varsym
-                (place-ptr
-                 (dbg " is place-ptr...~%")
-                 ,varsym)
-                (t (make-place-ptr
-                    :offset ,initial-offset
-                    :variable ,varsym)))))))
+         (if (and (integerp initial-offset) (= 0 initial-offset))
+             variable
+             `(progn
+                (let ((,varsym ,variable))
+                  (dbg "making place ptr to ~S(~S) ~S~%" ',variable ,varsym (place-ptr-p ,varsym))
+                  (typecase ,varsym
+                    (place-ptr
+                     (dbg "  -> is already a place-ptr...~%")
+                     ,varsym)
+                    (t (make-place-ptr
+                        :offset ,initial-offset
+                        :variable ,varsym))))))))
       (t
        (let ((varsym (gensym)))
          `(progn
@@ -174,6 +176,12 @@
                            (if ,new-value
                                (setf ,place ,new-value)
                                ,place))))))))))
+
+(defun ensure-place-ptr-offset (x)
+  (typecase x
+    (place-ptr (place-ptr-offset x))
+    (integer x)
+    (t 0)))
 
 (defun %ptr+ (ptr x)
   ;;(dbg "%ptr+: ~S ~S~%" ptr x)
@@ -188,24 +196,28 @@
             (offset (+ additional-offset (place-ptr-offset ptr))))
        (if (= 0 offset)
            var
-           (make-place-ptr
-            :offset offset
-            :variable var))))
+           (make-place-ptr :offset offset
+                           :variable var))))
     ((and (place-ptr-p x) (not (place-ptr-p ptr)))
      (let ((offset (+ ptr (place-ptr-offset x))))
        (if (= 0 offset)
            (place-ptr-variable x)
-           (make-place-ptr
-            :offset offset
-            :variable (place-ptr-variable x)))))
+           (make-place-ptr :offset offset
+                           :variable (place-ptr-variable x)))))
     ((place-ptr-p x)
-     (place-ptr-offset x))
+     (%ptr+ ptr (place-ptr-offset x)))
+    ((typep x 'simple-array)
+     (let ((offset (ensure-place-ptr-offset ptr)))
+       (if (= 0 offset)
+           x
+           (make-place-ptr :offset offset
+                           :variable x))))
     (t
-     (if (= 0 x)
-         ptr
-         (make-place-ptr
-          :offset x
-          :variable ptr)))))
+     (let ((offset (ensure-place-ptr-offset x)))
+       (if (= 0 offset)
+           ptr
+           (make-place-ptr :offset offset
+                           :variable ptr))))))
 
 (defun %ptr- (ptr x)
   (typecase x
@@ -215,11 +227,6 @@
                          (t 0))))
        (- ptr-offset (place-ptr-offset x))))
     (t (%ptr+ ptr (- x)))))
-
-(defun ensure-place-ptr-offset (x)
-  (typecase x
-    (place-ptr (place-ptr-offset x))
-    (t 0)))
 
 (defun %ptr< (x y)
   (dbg "%ptr< ~S ~S~%" x y)
