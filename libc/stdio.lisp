@@ -160,17 +160,24 @@
           (+ 127 (- c))
           c)))
 
+(defun buffer-write-byte (byte buffer)
+  (vector-push-extend byte buffer))
+
 (defun c-write-char (c stream)
   (let ((byte (if (characterp c)
                   (char-code c)
                   c)))
-    (write-byte byte stream)
-    (when (= 10 byte)
-      (force-output stream))))
+    (if (streamp stream)
+        (progn
+          (write-byte byte stream)
+          (when (= 10 byte)
+            (force-output stream)))
+        (buffer-write-byte byte stream))))
 
 (defun/1 fputc (c fd)
   (handler-case (progn (c-write-char (c-code-char c) (fd-stream fd))
-                       (force-output (fd-stream fd))
+                       (when (streamp (fd-stream fd))
+                         (force-output (fd-stream fd)))
                        c)
     (error ()
       (setf (ferror fd) EIO)
@@ -279,9 +286,11 @@
 
 (defun/1 fwrite (mem element_size count fd)
   (handler-case
-      (let ((start (memptr-ptr mem)))
+      (let* ((mem (vacietis::ensure-memptr mem))
+             (start (memptr-ptr mem)))
         (write-sequence (memptr-mem mem) (fd-stream fd)
                         :start start :end (+ start (* element_size count)))
+        (force-output (fd-stream fd))
         count)
     (error ()
       (setf (ferror fd) EIO)
@@ -544,14 +553,14 @@
   (apply #'fprintf stdout fmt args))
 
 (defun/1 sprintf (str fmt &rest args)
-  (replace
-   (memptr-mem str)
-   (memptr-mem
-    (string-to-char*
-     (with-output-to-string (out)
-       (apply #'fprintf (make-instance 'FILE :stream out) fmt args))))
-   :start1 (memptr-ptr str))
-  str)
+  (let ((str (vacietis::ensure-memptr str)))
+    (replace
+     (memptr-mem str)
+     (let ((buffer (make-array 10 :adjustable t :fill-pointer 0 :element-type '(unsigned-byte 8))))
+       (apply #'fprintf (make-instance 'FILE :stream buffer) fmt args)
+       buffer)
+     :start1 (memptr-ptr str))
+    str))
 
 (defun/1 snprintf (string max-length fmt &rest args)
   (error "NOT IMPLEMENTED YET"))

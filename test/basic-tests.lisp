@@ -201,8 +201,9 @@ r;
 
 (eval-test sprintf-padchar
   "#include <stdio.h>
-char *foo[6];
-sprintf(foo, \"%-5c\", 'X');"
+char foo[6];
+char *r = sprintf(foo, \"%-5c\", 'X');
+0+r;"
   "X    ")
 
 (eval-test typedef
