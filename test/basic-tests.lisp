@@ -258,6 +258,40 @@ p.x+p.y;
 "
            3)
 
+(eval-test function-returns-struct "
+typedef struct point {
+  int x;
+  int y;
+} point_t;
+point_t _p;
+point_t make_point (int c[]) {
+  _p.x = c[0];
+  _p.y = c[1];
+  return _p;
+}
+int c[2] = {1, 2};
+point_t p = make_point(c);
+p.x+p.y;
+"
+           3)
+(eval-test function-returns-struct* "
+typedef struct point {
+  int x;
+  int y;
+} point_t;
+point_t _p;
+point_t *make_point (int c[]) {
+  _p.x = c[0];
+  _p.y = c[1];
+  return &_p;
+}
+int c[2] = {1, 2};
+point_t *p = make_point(c);
+p->x+p->y;
+"
+           3)
+
+
 (eval-test define-define
   "#define FOO 1
 #define BAR FOO

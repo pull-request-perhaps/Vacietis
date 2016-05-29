@@ -1079,6 +1079,7 @@
 
 (defun read-var-or-function-declaration (base-type)
   "Reads a variable(s) or function declaration"
+  (dbg "read-var-or-function-declaration: ~S~%" base-type)
   (let ((type base-type)
         name
         (spec-so-far (make-buffer)))
@@ -1138,19 +1139,19 @@
   (awhen (gethash token (compiler-state-typedefs *compiler-state*))
     (setf token it))
   (cond ((eq token 'vacietis.c:enum)
-         (make-enum-type :name (next-exp)))
+         (values (make-enum-type :name (next-exp)) t))
         ((eq token 'vacietis.c:struct)
          (dbg "  -> struct~%")
          (if (eql #\{ (peek-char t %in))
              (progn
                (c-read-char)
-               (read-struct-decl-body (make-struct-type)))
+               (values (read-struct-decl-body (make-struct-type)) t))
              (let ((name (next-exp)))
                (dbg "  -> struct name: ~S~%" name)
-               (or (gethash name (compiler-state-structs *compiler-state*))
-                   (make-struct-type :name name)))))
+               (values (or (gethash name (compiler-state-structs *compiler-state*))
+                           (make-struct-type :name name)) t))))
         ((or (basic-type? token) (c-type-p token))
-         (modify-base-type token))
+         (values (modify-base-type token) nil))
         (t
          (read-error "Unexpected parser error: unknown type ~A" token))))
 
@@ -1225,14 +1226,16 @@
         ((c-type? token)
          (let* ((*is-extern* nil)
                 (*is-const* nil)
-                (*is-unsigned* nil)
-                (base-type (read-base-type token)))
-           (cond ((struct-type-p base-type)
-                  (read-struct base-type))
-                 ((enum-type-p base-type)
-                  (read-enum-decl))
-                 (t
-                  (read-var-or-function-declaration base-type)))))))
+                (*is-unsigned* nil))
+           (multiple-value-bind (base-type is-decl)
+               (read-base-type token)
+             (dbg "read-declaration base-type: ~S~%" base-type)
+             (if is-decl
+                 (cond ((struct-type-p base-type)
+                        (read-struct base-type))
+                       ((enum-type-p base-type)
+                        (read-enum-decl)))
+                 (read-var-or-function-declaration base-type)))))))
 
 (defun read-labeled-statement (token)
   (when (eql #\: (peek-char t %in))
