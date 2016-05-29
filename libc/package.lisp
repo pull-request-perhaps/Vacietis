@@ -228,4 +228,22 @@
    #:sscanf
    ))
 
+(deflibcpkg #:vacietis.libc.limits.h
+  (:export
+   #:CHAR_BIT
+   #:SCHAR_MIN
+   #:SCHAR_MAX
+   #:UCHAR_MAX
+   #:CHAR_MIN
+   #:CHAR_MAX
+   #:SHRT_MAX
+   #:SHRT_MIN
+   #:USHRT_MAX
+   #:INT_MAX
+   #:INT_MIN
+   #:UINT_MAX
+   #:LONG_MAX
+   #:LONG_MIN
+   #:ULONG_MAX))
+
 
