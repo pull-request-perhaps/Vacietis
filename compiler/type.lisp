@@ -55,11 +55,12 @@
         `(or ,@list))))
   
 (defun preallocated-value-exp-for (type)
+  (dbg "preallocated-value-exp-for: ~S~%" type)
   (cond
     ((struct-type-p type)  `(make-array ,(length (struct-type-slots type))
                                         :element-type ',(unique-element-type-list type)
                                         :initial-contents (list ,@(mapcar #'preallocated-value-exp-for (struct-type-slots type)))))
-    ((array-type-p type)   `(make-array ,(size-of type)
+    ((array-type-p type)   `(make-array ,(or (size-of type) 1)
                                         :element-type ',(lisp-type-for (array-type-element-type type))))
     ((eq type 'vacietis.c:double) 0.0d0)
     ((eq type 'vacietis.c:float)  0.0e0)
@@ -70,7 +71,10 @@
         (type-dimensions (array-type-dimensions type)))
       (if (array-type-p element-type)
           (%lisp-type-for-array-type element-type (append dimensions type-dimensions))
-          (throw :found-type (list 'simple-array (lisp-type-for element-type) (append dimensions type-dimensions))))))
+          (throw :found-type (list 'simple-array (lisp-type-for element-type)
+                                   (aif (append dimensions type-dimensions)
+                                        it
+                                        1))))))
 
 (defun lisp-type-for-array-type (type &optional dimensions)
   (catch :found-type
@@ -115,6 +119,7 @@
      return (aref array i)))
 
 (defun lisp-type-declaration-for (type &optional name)
+  (dbg "lisp-type-declaration-for ~S~%" type)
   (if name
       (let ((lisp-type (lisp-type-for type)))
         (unless (eq t lisp-type)
@@ -128,14 +133,21 @@
             ((and (= length 3) (equalp #() (aref type 2)))
              (dbg "function pointer: ~S~%" type)
              ;; #(vacietis.c:int #(vacietis.c:* getfn) #())
-             ;; XXX what about pointers to function points?
+             ;; XXX what about pointers to function pointers?
              (let ((name (aref (aref type 1) 1)))
                `(type (or function symbol integer place-ptr nil) ,name)))
             (t
              (when (eq (aref type 1) 'vacietis.c:*)
-               `(type (or
-                       ;;place-ptr t ;; XXX
-                       (simple-array ,(lisp-type-for (aref type 0)) ,(make-list (- length 2) :initial-element '*))) ,name))))))))
+               (let ((level (count-if (lambda (x)
+                                        (or (eq 'vacietis.c:* x)
+                                            (and (listp x)
+                                                 (eq 'vacietis.c:[] (car x)))))
+                                      type)))
+                 `(type
+                   ;;(or
+                   (simple-array ,(lisp-type-for (aref type 0)) ,(make-list level :initial-element '*))
+                   ;;place-ptr t) ;; XXX
+                   ,name)))))))))
 
 (defun lisp-constant-value-for (type constant)
   (cond

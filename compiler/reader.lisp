@@ -679,7 +679,7 @@
           (read-error "Error parsing expression: ~A" (subseq exp start end))))
       (progn
         (let ((type (c-type-of-exp exp)))
-          (dbg "type of ~S: ~S~%" exp (c-type-of-exp exp))
+          (dbg "type of ~S: ~S~%" exp type)
           (case type
             ('function
              `(fdefinition ',exp))
@@ -1018,7 +1018,9 @@
                         (setf type (make-pointer-to :type type))
                         (dbg "set type to ~S~%" type)
                         ;;XXX what about actual pointers to pointers?
-                        (unless (and (listp initial-value) (eq (car initial-value) 'vacietis.c:mkptr&))
+                        (unless (or (null initial-value)
+                                    (and (listp initial-value)
+                                         (eq (car initial-value) 'vacietis.c:mkptr&)))
                           (setq initial-value `(vacietis.c:mkptr& (aref ,initial-value 0))))
                         (parse-declaration name))
                        (t (read-error "Unknown thing in declaration ~A" x)))))))
@@ -1058,7 +1060,7 @@
                         (push `(vacietis.c:= ,name ,initial-value)
                               decl-code)))
                (unless *is-extern*
-                 (dbg "global type: ~S~%" type)
+                 (dbg "global ~S type: ~S initial-value: ~S~%" name type initial-value)
                  (let* ((defop 'defparameter)
                         (varname name)
                         (varvalue (or initial-value

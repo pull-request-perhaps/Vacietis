@@ -512,9 +512,25 @@ foo[2] = 5;
   5)
 
 (eval-test main-args "
+#include <string.h>
 int main (int argc, char *argv[]) {
-  return argc;
+  return strlen(*(argv+(argc-1)));
 }
-main(0, 0);
+char *argv[2];
+argv[0] = \"main\";
+argv[1] = \"12345\";
+main(2, argv);
 "
-           0)
+           5)
+
+(eval-test main-args-2* "
+#include <string.h>
+int main (int argc, char **argv) {
+  return strlen(*(argv+(argc-1)));
+}
+char *argv[2];
+argv[0] = \"main\";
+argv[1] = \"12345\";
+main(2, argv);
+"
+           5)
