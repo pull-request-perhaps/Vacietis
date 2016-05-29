@@ -79,7 +79,7 @@
     'c-reader-error
     :stream %in
     :msg (format nil
-                 "Error reading C stream~@[ from file ~A~]~@[ at line ~A~]: ~?"
+                 "Error reading C stream~@[ from file ~A~]~@[ at line ~A~]:~% ~?"
                  *c-file* *line-number* msg args))))
 
 ;;; basic stream stuff
@@ -1099,12 +1099,6 @@
           (read-function name type)
           (read-variable-declarations spec-so-far base-type)))))
 
-(defun read-typedef (base-type)
-  (multiple-value-bind (name type)
-      (process-variable-declaration (read-infix-exp (next-exp)) base-type)
-    (setf (gethash name (compiler-state-typedefs *compiler-state*)) type)
-    t))
-
 (defun read-enum-decl ()
   (when (eql #\{ (peek-char t %in))
     (next-char)
@@ -1129,6 +1123,7 @@
     (t base-type)))
 
 (defun read-base-type (token)
+  (dbg "read-base-type: ~S~%" token)
   (loop while (type-qualifier? token)
      do
        (dbg "type qualifier token: ~S~%" token)
@@ -1145,11 +1140,13 @@
   (cond ((eq token 'vacietis.c:enum)
          (make-enum-type :name (next-exp)))
         ((eq token 'vacietis.c:struct)
+         (dbg "  -> struct~%")
          (if (eql #\{ (peek-char t %in))
              (progn
                (c-read-char)
                (read-struct-decl-body (make-struct-type)))
              (let ((name (next-exp)))
+               (dbg "  -> struct name: ~S~%" name)
                (or (gethash name (compiler-state-structs *compiler-state*))
                    (make-struct-type :name name)))))
         ((or (basic-type? token) (c-type-p token))
@@ -1175,7 +1172,14 @@
            #+nil
            (incf i (size-of slot-type))))))
 
-(defun read-struct (struct-type)
+(defun read-c-identifier-list (c)
+  (map 'list (lambda (v)
+               (if (= 1 (length v))
+                   (aref v 0)
+                   v))
+       (c-read-delimited-list #\; #\,)))
+
+(defun read-struct (struct-type &optional for-typedef)
   (acase (next-char)
     (#\{ (read-struct-decl-body struct-type)
          (awhen (struct-type-name struct-type)
@@ -1185,15 +1189,39 @@
            (if (eql #\; c)
                t
                (progn (c-unread-char c)
-                      (read-variable-declarations #() struct-type)))))
+                      (if for-typedef
+                          (read-c-identifier-list c)
+                          (read-variable-declarations #() struct-type))))))
     (#\; t) ;; forward declaration
-    (t   (read-variable-declarations (vector (read-c-exp it))
-                                     struct-type))))
+    (t   (if for-typedef
+             (progn (c-unread-char it)
+                    (read-c-identifier-list it))
+             (read-variable-declarations (vector (read-c-exp it))
+                                         struct-type)))))
+
+(defun read-typedef (base-type)
+  (dbg "read-typedef: ~S~%" base-type)
+  (cond ((struct-type-p base-type)
+         (let ((names (read-struct base-type t)))
+           (dbg "typedef read-struct names: ~S~%" names)
+           (dolist (name names)
+             (when (symbolp name) ;; XXX handle pointer and array typedefs
+               (setf (gethash name (compiler-state-typedefs *compiler-state*)) base-type)))
+           t))
+        (t
+         (multiple-value-bind (name type)
+             (process-variable-declaration (read-infix-exp (next-exp)) base-type)
+           (setf (gethash name (compiler-state-typedefs *compiler-state*)) type)
+           t))))
 
 (defun read-declaration (token)
   (cond ((eq 'vacietis.c:typedef token)
          (let ((*is-unsigned* nil))
-           (read-typedef (read-base-type (next-exp)))))
+           (let* ((*is-extern* nil)
+                  (*is-const* nil)
+                  (*is-unsigned* nil)
+                  (base-type (read-base-type (next-exp))))
+             (read-typedef base-type))))
         ((c-type? token)
          (let* ((*is-extern* nil)
                 (*is-const* nil)

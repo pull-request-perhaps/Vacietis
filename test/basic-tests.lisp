@@ -237,6 +237,27 @@ Baz baz = 4;
 baz;"
   4)
 
+(eval-test typedef-struct1 "
+typedef struct point {
+  int x;
+  int y;
+} point_t, *point_ptr_t, points_t[2];
+point_t p = {1, 2};
+p.x+p.y;
+"
+           3)
+
+(eval-test typedef-struct2 "
+struct point {
+  int x;
+  int y;
+};
+typedef struct point point_t;
+point_t p = {1, 2};
+p.x+p.y;
+"
+           3)
+
 (eval-test define-define
   "#define FOO 1
 #define BAR FOO
