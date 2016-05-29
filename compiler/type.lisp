@@ -109,6 +109,11 @@
     ((eq type 'vacietis.c:unsigned-char)   '(unsigned-byte 8))
     (t t)))
 
+(defun last-symbol-in-array (array)
+  (loop for i from (1- (length array)) downto 0
+     when (symbolp (aref array i))
+     return (aref array i)))
+
 (defun lisp-type-declaration-for (type &optional name)
   (if name
       (let ((lisp-type (lisp-type-for type)))
@@ -116,7 +121,7 @@
           `(type ,lisp-type ,name)))
       (when (vectorp type)
         (let* ((length (length type))
-               (name (aref type (1- length))))
+               (name (last-symbol-in-array type)))
           (cond
             ((= length 2)
              (lisp-type-declaration-for (aref type 0) name))

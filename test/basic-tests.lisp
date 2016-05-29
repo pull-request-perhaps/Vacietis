@@ -510,3 +510,11 @@ foo[2] = 5;
 
 *(x + 1);"
   5)
+
+(eval-test main-args "
+int main (int argc, char *argv[]) {
+  return argc;
+}
+main(0, 0);
+"
+           0)
