@@ -8,7 +8,7 @@
 (in-package #:vacietis.c)
 
 (cl:defparameter vacietis::*type-qualifiers*
-  #(static const signed unsigned extern auto register))
+  #(inline static const signed unsigned extern auto register))
 
 (cl:defparameter vacietis::*ops*
   #(= += -= *= /= %= <<= >>= &= ^= |\|=| ? |:| |\|\|| && |\|| ^ & == != < > <= >= << >> ++ -- + - * / % ! ~ -> |.| |,|
@@ -409,6 +409,25 @@
           (when (gethash x (compiler-state-functions *compiler-state*))
             'function))))
 
+(defun array-type-of-exp (exp &optional base-type)
+  (let ((type
+         (if (listp exp)
+             (cond
+               ((eq 'vacietis.c:alien[] (car exp))
+                (let ((type (array-type-of-exp (third exp))))
+                  (when type
+                    (when (array-type-p type)
+                      type))))
+               ((eq 'vacietis.c:[] (car exp))
+                (let ((type (array-type-of-exp (second exp))))
+                  (when type
+                    (when (array-type-p type)
+                      type))))
+               (t
+                (c-type-of-exp exp)))
+             (c-type-of exp))))
+    type))
+
 (defun c-type-of-exp (exp &optional base-type)
   ;;(when *local-var-types* (maphash #'(lambda (k v) (dbg "  ~S: ~S~%" k v)) *local-var-types*))
   ;;(maphash #'(lambda (k v) (dbg "  ~S: ~S~%" k v)) (compiler-state-var-types *compiler-state*))
@@ -438,19 +457,24 @@
                 ;; XXX assume int
                 'vacietis.c:int)
                ((eq 'vacietis.c:|.| (car exp))
-                (let ((struct-type (c-type-of-exp (cadr exp))))
-                  (nth (caddr exp) (struct-type-slots struct-type))))
+                (let ((struct-type (c-type-of-exp (second exp))))
+                  (if *use-alien-types*
+                      (nth (position (cadr (caddr exp)) (struct-type-slot-names struct-type)) (struct-type-slots struct-type))
+                      (nth (caddr exp) (struct-type-slots struct-type)))))
                ((eq 'vacietis.c:[] (car exp))
-                (let ((type (c-type-of-exp (cadr exp))))
-                  ;;(dbg "c-type of ~S: ~S~%" (cadr exp) type)
+                (let ((type (c-type-of-exp (second exp))))
                   (when type
-                    ;; should be array-type
+                    (when (array-type-p type)
+                      (array-type-element-type type)))))
+               ((eq 'vacietis.c:alien[] (car exp))
+                (let ((type (c-type-of-exp (third exp))))
+                  (when type
                     (when (array-type-p type)
                       (array-type-element-type type)))))
                ((member (car exp) (mapcar #'(lambda (x) (intern (string-upcase x) :vacietis.c))
                                           '(&& |\|\|| < <= > >= == != ptr< ptr<= ptr> ptr>= ptr== ptr!=)))
                 nil)
-               ((member (car exp) '(- + * /))
+               ((member (car exp) '(cl:- cl:+ cl:* cl:/))
                 (c-type-of-exp (cadr exp)))
                ((gethash (car exp) (compiler-state-functions *compiler-state*))
                 (c-function-return-type (gethash (car exp) (compiler-state-functions *compiler-state*))))
@@ -459,7 +483,7 @@
                 ;; XXX
                 'vacietis.c:int))
              (c-type-of exp))))
-    (dbg "c-type-of-exp ~S: ~S~%" exp type)
+    ;;(dbg "c-type-of-exp ~S: ~S~%" exp type)
     type))
 
 (defun struct-name-of-type (type)
@@ -500,13 +524,13 @@
                    ;;(dbg "binary-op pre parse ~S ~S-~S-~S~%" (or op (aref exp i)) start i end)
                    (let* ((lvalue (parse-infix exp start i))
                           (rvalue (parse-infix exp (1+ i) end)))
-                     (dbg "binary-op ~S ~S ~S~%" (or op (aref exp i)) lvalue rvalue)
-                     (let ((c-type (if (and (not (listp lvalue)) (boundp '*variable-declarations-base-type*))
-                                       *variable-declarations-base-type*
-                                       (c-type-of-exp lvalue base-type)))
+                     ;;(dbg "binary-op ~S ~S ~S~%" (or op (aref exp i)) lvalue rvalue)
+                     (let ((l-c-type (if (and (not (listp lvalue)) (boundp '*variable-declarations-base-type*))
+                                         *variable-declarations-base-type*
+                                         (c-type-of-exp lvalue base-type)))
                            (r-c-type (c-type-of-exp rvalue))
                            (op (or op (aref exp i))))
-                       (dbg "  -> type of lvalue ~S is: ~S~%" lvalue c-type)
+                       (dbg "  -> type of lvalue ~S is: ~S~%" lvalue l-c-type)
                        (dbg "  -> type of rvalue ~S is: ~S~%" rvalue r-c-type)
                        (when (member op '(vacietis.c:|\|\|| vacietis.c:&&))
                          (when (integer-type? (c-type-of-exp lvalue))
@@ -515,34 +539,35 @@
                            (setq rvalue `(not (eql 0 ,rvalue)))))
                        (list (let ()
                                (cond
-                                 ((and (pointer-to-p c-type)
+                                 ((and (or (pointer-to-p l-c-type)
+                                           (array-type-p l-c-type))
                                        (or (not (listp lvalue))
                                            (not (eq 'vacietis.c:deref* (car lvalue)))))
                                   (case op
-                                    ('vacietis.c:+ 'vacietis.c:ptr+)
-                                    ('vacietis.c:+= 'vacietis.c:ptr+=)
-                                    ('vacietis.c:- 'vacietis.c:ptr-)
-                                    ('vacietis.c:-= 'vacietis.c:ptr-=)
-                                    ('vacietis.c:< 'vacietis.c:ptr<)
-                                    ('vacietis.c:<= 'vacietis.c:ptr<=)
-                                    ('vacietis.c:> 'vacietis.c:ptr>)
-                                    ('vacietis.c:>= 'vacietis.c:ptr>=)
-                                    ('vacietis.c:== 'vacietis.c:ptr==)
-                                    ('vacietis.c:!= 'vacietis.c:ptr!=)
+                                    (vacietis.c:+ 'vacietis.c:ptr+)
+                                    (vacietis.c:+= 'vacietis.c:ptr+=)
+                                    (vacietis.c:- 'vacietis.c:ptr-)
+                                    (vacietis.c:-= 'vacietis.c:ptr-=)
+                                    (vacietis.c:< 'vacietis.c:ptr<)
+                                    (vacietis.c:<= 'vacietis.c:ptr<=)
+                                    (vacietis.c:> 'vacietis.c:ptr>)
+                                    (vacietis.c:>= 'vacietis.c:ptr>=)
+                                    (vacietis.c:== 'vacietis.c:ptr==)
+                                    (vacietis.c:!= 'vacietis.c:ptr!=)
                                     (t op)))
                                  ((pointer-to-p r-c-type)
                                   (case op
-                                    ('vacietis.c:+ 'vacietis.c:ptr+)
+                                    (vacietis.c:+ 'vacietis.c:ptr+)
                                     (t op)))
-                                 ((integer-type? c-type)
+                                 ((integer-type? l-c-type)
                                   (case op
-                                    ('vacietis.c:/ 'vacietis.c:integer/)
-                                    ('vacietis.c:/= 'vacietis.c:integer/=)
+                                    (vacietis.c:/ 'vacietis.c:integer/)
+                                    (vacietis.c:/= 'vacietis.c:integer/=)
                                     (t op)))
                                  (t op)))
                              lvalue
                              (if (and (constantp rvalue) (numberp rvalue))
-                                 (lisp-constant-value-for c-type rvalue)
+                                 (lisp-constant-value-for l-c-type rvalue)
                                  rvalue))))))
           ;; in order of weakest to strongest precedence
           ;; comma
@@ -602,7 +627,7 @@
                                                (parse-infix exp start  i)
                                                (parse-infix exp (1+ i) end)))
                                  (place-type (c-type-of-exp place))
-                                 (__ (dbg "place-type of ~S: ~S~%" place place-type))
+                                 ;;(__ (dbg "place-type of ~S: ~S~%" place place-type))
                                  (set-exp `(vacietis.c:=
                                             ,place
                                             (,(if (eq x 'vacietis.c:++)
@@ -655,22 +680,36 @@
                                      ,(if (eq x 'vacietis.c:->)
                                           `(vacietis.c:deref* ,(elt exp 1))
                                           (elt exp 1))
-                                     ,(gethash (format nil "~A.~A" (struct-name-of-type ctype) (elt exp 2))
-                                               (compiler-state-accessors *compiler-state*)))))))
+                                     ,(if *use-alien-types*
+                                          (list ctype
+                                                (gethash (format nil "~A.~A" (struct-name-of-type ctype) (elt exp 2))
+                                                         (compiler-state-accessors *compiler-state*)))
+                                          (gethash (format nil "~A.~A" (struct-name-of-type ctype) (elt exp 2))
+                                                   (compiler-state-accessors *compiler-state*))))))))
                  ((listp x) ;; aref
                   (return-from parse-infix
                     (if (eq (car x) 'vacietis.c:[])
-                        `(vacietis.c:[] ,(parse-infix exp start i)
-                                        ,(parse-infix (second x)))
+                        (let* ((array (parse-infix exp start i))
+                               (index (parse-infix (second x)))
+                               (array-type (array-type-of-exp array)))
+                          (dbg "array-type of ~S: ~S~%" array array-type)
+                          (if *use-alien-types*
+                              `(vacietis.c:alien[] ,@(when array-type (list array-type)) ,array ,index)
+                              `(vacietis.c:[] ,array ,index)))
                         (read-error "Unexpected list when parsing ~A" exp))))
                  ((vectorp x) ;; funcall
                   (dbg "funcall: ~S~%" x)
                   (return-from parse-infix
                     (let ((fun-exp (parse-infix exp start i)))
                      (append
-                      (if (symbolp fun-exp)
-                          (list fun-exp)
-                          (list 'funcall fun-exp))
+                      (cond
+                        ((symbolp fun-exp)
+                         (list fun-exp))
+                        ((and (listp fun-exp)
+                              (eql 'fdefinition (car fun-exp)))
+                         (list (cadr (cadr fun-exp))))
+                        (t
+                         (list 'funcall fun-exp)))
                       (loop with xstart = 0
                             for next = (position 'vacietis.c:|,| x :start xstart)
                             when (< 0 (length x))
@@ -679,7 +718,7 @@
           (read-error "Error parsing expression: ~A" (subseq exp start end))))
       (progn
         (let ((type (c-type-of-exp exp)))
-          (dbg "type of ~S: ~S~%" exp type)
+          ;;(dbg "type of ~S: ~S~%" exp type)
           (case type
             ('function
              `(fdefinition ',exp))
@@ -827,7 +866,6 @@
                ,(read-block-or-statement)))))))
 
 (defun read-function (name result-type)
-  ;;(declare (ignore result-type))
   (let (arglist
         arglist-type-declarations
         (*function-name* name)
@@ -836,24 +874,28 @@
       (loop for param across (c-read-delimited-list (next-char) #\,) do
            (block done-arg
              (let ((ptrlev 0)
+                   (arg-name)
                    (arg-type
                     (when (and (vectorp param) (c-type? (aref param 0)))
                       (aref param 0))))
                (labels ((strip-type (x)
                           (cond ((symbolp x)
-                                 (if (> ptrlev 0)
-                                     (let ((type arg-type))
-                                       (loop while (> ptrlev 0)
-                                          do (setq type (make-pointer-to :type type))
-                                            (decf ptrlev))
-                                       (setf (gethash x *local-var-types*) type))
-                                     (setf (gethash x *local-var-types*) arg-type))
+                                 (when (> ptrlev 0)
+                                   (let ((type arg-type))
+                                     (loop while (> ptrlev 0)
+                                        do (setq type (make-pointer-to :type type))
+                                          (decf ptrlev))
+                                     (setq arg-type type)))
+                                 (setf (gethash x *local-var-types*) arg-type)
+                                 (setq arg-name x)
                                  (push x arglist)
-                                 (return-from done-arg))
+                                 ;;(return-from done-arg)
+                                 )
                                 ((vectorp x)
                                  (loop for x1 across x do
                                       (when (not (or (c-type? x1)
-                                                     (eq 'vacietis.c:* x1)))
+                                                     (eq 'vacietis.c:* x1)
+                                                     (eq 'vacietis.c:|,| x1)))
                                         (strip-type x1))))
                                 (t
                                  (read-error
@@ -862,6 +904,7 @@
                    (dbg "  param: ~S~%" param)
                    (when (and (= (length param) 3) (equalp #() (aref param 2)))
                      (setq arg-type 'function-pointer))
+                   #+nil
                    (push (lisp-type-declaration-for param)
                          arglist-type-declarations))
                  (loop for x across param do
@@ -872,8 +915,19 @@
                                 (return-from done-arglist)))
                         ((eq 'vacietis.c:* x)
                          (incf ptrlev))
+                        ((and (listp x) (eq 'vacietis.c:[] (car x)))
+                         (setf arg-type
+                               (make-array-type
+                                :element-type arg-type
+                                :dimensions (awhen (cadr x)
+                                              (when (> (length it) 0)
+                                                (list (aref it 0))))))
+                         (dbg "  -> arg-type: ~S~%" arg-type)
+                         (setf (gethash arg-name *local-var-types*) arg-type))
                         ((not (or (c-type? x) (eq 'vacietis.c:* x)))
-                         (strip-type x)))))))))
+                         (strip-type x))))
+                 (push (lisp-type-declaration-for arg-type arg-name)
+                       arglist-type-declarations))))))
     (if (eql (peek-char nil %in) #\;)
         (prog1 t (c-read-char)) ;; forward declaration
         (let ((ftype `(ftype (function ,(make-list (length arglist) :initial-element '*) ,(lisp-type-for result-type)) ,name)))
@@ -882,8 +936,10 @@
           (dbg "result type of ~S: ~S~%" name result-type)
           (dbg "ftype: ~S~%" ftype)
           (setf (gethash name (compiler-state-functions *compiler-state*))
-                (make-c-function :return-type result-type))
+                (make-c-function :return-type result-type
+                                 :inline *is-inline*))
           `(progn
+             ,@(when *is-inline* (list `(declaim (inline ,name))))
              ,@(when ftype (list `(declaim ,ftype)))
              (vac-defun/1 ,name ,(reverse arglist)
                (declare ,@(remove-if #'null arglist-type-declarations))
@@ -894,6 +950,166 @@
                           (declare ,@(remove-if #'null *variable-lisp-type-declarations*))
                           ,@body))))))))
 
+(defun one-long-progn (body)
+  (loop for x in body
+     nconc (cond
+             ((and (listp x) (eq 'progn (car x)))
+              (one-long-progn (cdr x)))
+             (t
+              (list x)))))
+
+(defun set-alien-values (type alien next-value next-offset)
+  (cond
+    ((array-type-p type)
+     (let* ((dimensions   (lisp-array-dimensions type))
+            (element-type (lisp-array-element-type type))
+            (depth        (1- (length dimensions)))
+            (indices      (make-list (1+ depth) :initial-element 0)))
+       ;;(dbg "set-alien-values dimensions: ~S~%" dimensions)
+       (labels ((do-nth-dimension (n)
+                  (loop for j below (nth n dimensions)
+                     do (setf (nth n indices) j)
+                     collect (if (= n depth)
+                                 (let ((indexen (copy-list indices)))
+                                   (set-alien-values element-type
+                                                     alien
+                                                     #+nil
+                                                     `(sb-alien:deref ,alien ,@indexen)
+                                                     next-value next-offset))
+                                 `(progn ,@(do-nth-dimension (1+ n)))))))
+         `(progn ,@(do-nth-dimension 0)))))
+    ((struct-type-p type)
+     `(progn
+        ,@(map-struct-slots
+           (lambda (name type)
+             (set-alien-values type
+                               alien
+                               #+nil
+                               `(sb-alien:slot ,alien ',name)
+                               next-value next-offset))
+           type)))
+    (t
+     ;;(dbg "set-alien-values type: ~S~%" type)
+     (let ((setter (sap-set-ref-for type)))
+       `(,setter ,alien ,(funcall next-offset type) ,(funcall next-value type)))
+     #+nil
+     `(setf ,alien ,(funcall next-value type)))))
+
+(defun vac-arithmetic-expression? (expr)
+  (cond
+    ((or (numberp expr)
+         ;; XXX bit shifts, what else?
+         (member expr '(cl:+ cl:- cl:* cl:/ cl:mod))
+         (member expr '(vacietis.c:+ vacietis.c:- vacietis.c:* vacietis.c:/ vacietis.c:%)))
+     expr)
+    ((listp expr)
+     (dolist (e expr expr)
+       (unless (vac-arithmetic-expression? e)
+         (return nil))))
+    (t
+     nil)))
+
+(defun flatten-vector-literal (value)
+  (loop for x in (cond ((vector-literal-p value)
+                        (vector-literal-elements value))
+                       (t
+                        value))
+     nconc (cond
+             ((vector-literal-p x)
+              (flatten-vector-literal x))
+             ((atom x)
+              (list x))
+             ((vac-arithmetic-expression? x)
+              (list x))
+             (t
+              (flatten-vector-literal x)))))
+
+(defmacro vac-arithmetic-expression-override (&body body)
+  `(macrolet ((vacietis.c:+ (&rest rest)
+                `(+ ,@rest))
+              (vacietis.c:- (&rest rest)
+                `(- ,@rest))
+              (vacietis.c:* (&rest rest)
+                `(* ,@rest))
+              (vacietis.c:/ (&rest rest)
+                `(/ ,@rest)))
+     ,@body))
+
+(defmacro evaluate-arithmetic-expression (expr)
+  `(vac-arithmetic-expression-override
+     (let ((expanded-body (macroexpansion-of ,expr)))
+       ;;(dbg "expanded-body: ~S~%" expanded-body)
+       (eval expanded-body))))
+
+(defun convert-to-alien-value (type value)
+  (let ((c-sap (gensym))
+        (sap (gensym))
+        (offset 0)
+        (size (gensym))
+        (alien-type (alien-type-for type))
+        (elements (flatten-vector-literal value)))
+    (dbg "convert-to-alien: alien type: ~S~%" alien-type)
+    ;;(dbg "convert-to-alien: flattened: ~S~%" elements)
+    (labels ((next-value (type)
+               (let ((value (pop elements)))
+                 (cond
+                   ((and (eq type 'vacietis.c:float) (typep value 'double-float))
+                    (coerce value 'single-float))
+                   ((and (constantp value) (numberp value))
+                    (lisp-constant-value-for type value))
+                   ((vac-arithmetic-expression? value)
+                    ;;(dbg "is vac-arith...~%")
+                    (eval `(evaluate-arithmetic-expression ,value)))
+                   (t
+                    value))))
+             (next-offset (type)
+               (prog1 offset
+                 (incf offset (eval `(sb-alien:alien-size ,(alien-type-for type) :bytes))))))
+      `(locally
+           (declare (optimize (speed 3) (safety 0) (debug 0)))
+         (let* ((,size (sb-alien:alien-size ,alien-type :bytes))
+                (,c-sap (array-backed-sap ,size)))
+           (with-array-backed-saps (,c-sap)
+             (let ((,sap (c-sap-sap ,c-sap)))
+               ,(one-long-progn (set-alien-values type sap #'next-value #'next-offset))))
+           ,c-sap)))))
+
+(defun to-struct-value (type value)
+  (if *use-alien-types*
+      (convert-to-alien-value type value)
+      (let ((row (map 'list #'identity (vector-literal-elements value))))
+        (dbg "lisp-type: ~S~%" (lisp-type-for type))
+        (dbg "row: ~S~%" row)
+        (let* ((lisp-type (lisp-type-for type))
+               (element-type (cadr lisp-type)))
+          `(make-array ,(length row)
+                       :element-type ',element-type
+                       :initial-contents
+                       ,(list*
+                         'list
+                         (labels ((next-value (type)
+                                    (let ((value (pop row)))
+                                      (dbg "to-struct-value type: ~S value: ~S~%" type value)
+                                      (cond
+                                        ((struct-type-p type)
+                                         (to-struct-value type value))
+                                        ((array-type-p type)
+                                         (dbg "array-element-type: ~S~%" (lisp-type-for (array-type-element-type type)))
+                                         `(make-array ',(array-type-dimensions type)
+                                                      :element-type ',(lisp-type-for (array-type-element-type type))
+                                                      :initial-contents
+                                                      ,(list* 'list (get-elements (array-type-element-type type) (array-type-dimensions type) value))))
+                                        ((and (constantp value) (numberp value))
+                                         (lisp-constant-value-for type value))
+                                        ((arithmetic-expression? value)
+                                         (eval value))
+                                        (t
+                                         value)))))
+                           (map-struct-slots
+                            (lambda (name type)
+                              (next-value type))
+                            type))))))))
+
 (defun get-dimensions (name1 &optional dimensions)
   (dbg "get-dimensions name1: ~S~%" name1)
   (let ((dim1 (third name1)))
@@ -901,40 +1117,67 @@
       (nconc dimensions (get-dimensions (second name1)) (list dim1))
       (nconc dimensions (list dim1)))))
 
+(defun arithmetic-expression? (expr)
+  (cond
+    ((or (numberp expr)
+         ;; XXX bit shifts, what else?
+         (member expr '(cl:+ cl:- cl:* cl:/ cl:mod)))
+     expr)
+    ((listp expr)
+     (dolist (e expr expr)
+       (unless (arithmetic-expression? e)
+         (return nil))))
+    (t
+     nil)))
+
 (defun get-elements (base-type dimensions value)
   (if (= 1 (length dimensions))
-      (map 'vector #'(lambda (x)
-                       ;;(dbg "element value: ~S~%" x)
-                       (if (vector-literal-p x)
-                           (let ((elements (vector-literal-elements x)))
-                             (get-elements base-type (list (length elements)) x))
-                           ;; XXX fix this
-                           (let ((constant-value (ignore-errors (eval x))))
-                             (if constant-value
-                                 (lisp-constant-value-for base-type constant-value)
-                                 x))))
+      (map 'list #'(lambda (x)
+                     ;;(dbg "element value: ~S~%" x)
+                     (if (vector-literal-p x)
+                         (let ((elements (vector-literal-elements x)))
+                           (if (and (not *use-alien-types*) (struct-type-p base-type))
+                               (to-struct-value base-type x)
+                               (list* 'list (get-elements base-type (list (length elements)) x))))
+                         (cond
+                           ((and (constantp x) (numberp x))
+                            (lisp-constant-value-for base-type x))
+                           ((arithmetic-expression? x)
+                            (eval x))
+                           (t
+                            x))))
            (vector-literal-elements value))
-      (map 'vector #'(lambda (x)
-                       (get-elements base-type (cdr dimensions) x))
+      (map 'list #'(lambda (x)
+                     (list* 'list (get-elements base-type (cdr dimensions) x)))
            (vector-literal-elements value))))
 
-(defun to-lisp-array (base-type name1 value)
-  (let ((dimensions (get-dimensions name1)))
+(defun to-lisp-array (type base-type name1 value)
+  (let* ((dimensions (get-dimensions name1))
+         (lisp-element-type (lisp-type-for base-type))
+         (elements (remove-if #'null (get-elements base-type dimensions value))))
+    (dbg "to-lisp-array: dimensions: ~S~%" dimensions)
+    (when (null (car dimensions))
+      (setf dimensions (list (length elements)))
+      (unless (array-type-dimensions type)
+        (setf (array-type-dimensions type)
+              (if (listp dimensions)
+                  dimensions
+                  (list dimensions)))))
     (if (null (car dimensions))
-        (remove-if #'null (get-elements base-type dimensions value))
-        ;;(get-elements base-type dimensions value)
-        (let ((elements (get-elements base-type dimensions value))
-              (lisp-type (lisp-type-for base-type)))
+        (if *use-alien-types*
+            (convert-to-alien-value type value)
+            (values `(make-array ,(length elements)
+                                 :element-type ',lisp-element-type
+                                 :initial-contents (list ,@(map 'list #'identity elements)))
+                    (length elements)))
+        (progn
           (dbg "making array of dimensions ~S~%" dimensions)
-          (dbg "elements: ~S~%" elements)
-          (if (find-if-not #'(lambda (x) (typep x lisp-type)) elements)
+          ;;(dbg "elements: ~S~%" elements)
+          (if *use-alien-types*
+              (convert-to-alien-value type value)
               (values `(make-array ',dimensions
-                                   :element-type ',lisp-type
+                                   :element-type ',lisp-element-type
                                    :initial-contents (list ,@(map 'list #'identity elements)))
-                      dimensions)
-              (values (make-array dimensions
-                                  :element-type (lisp-type-for base-type)
-                                  :initial-contents elements)
                       dimensions))))))
 
 ;; for an array of struct typed objects
@@ -953,40 +1196,44 @@
                                        :element-type (lisp-type-for element-type)
                                        :initial-contents it))))))))))
 
-(defun to-struct-value (type value)
-  (let ((row (map 'vector #'identity (vector-literal-elements value))))
-    (dbg "lisp-type: ~S~%" (lisp-type-for type))
-    (dbg "row: ~S~%" row)
-    (let* ((lisp-type (lisp-type-for type))
-           (element-type (cadr lisp-type)))
-      (make-array (length row)
-                  :element-type element-type
-                  :initial-contents row))))
+(defvar *in-struct* nil)
 
 (defun process-variable-declaration (spec base-type)
   (let (name (type base-type) initial-value init-size)
     (labels ((init-object (name1 value)
                (if (vector-literal-p value)
-                   (let () ;;((els (cons 'vector (vector-literal-elements value))))
-                     ;; (vacietis.c:[] elp10 nil)
-                     ;; name1: (vacietis.c:[] (vacietis.c:[] del 4) 5)
-                     ;; name1: (vacietis.c:[] (vacietis.c:[] (vacietis.c:[] del 3) 4) 5)
+                   (let ()
                      (dbg "variable declaration of ~S: type: ~S name1: ~S~%" name type name1)
                      (if (struct-type-p type)
                          (if (symbolp name)
                              (to-struct-value type value)
-                             (let ((array (to-lisp-array base-type name1 value)))
-                               (pass2-struct-array type array)
-                               (setf init-size (length array))
+                             (multiple-value-bind (array dimensions)
+                                 (to-lisp-array type base-type name1 value)
+                               (when type
+                                 (unless (array-type-dimensions type)
+                                   (setf (array-type-dimensions type)
+                                         (if (listp dimensions)
+                                             dimensions
+                                             (list dimensions)))))
+                               ;;(unless *use-alien-types*
+                               ;;  (pass2-struct-array type array))
+                               (dbg "set dimensions to: ~S~%" dimensions)
+                               (dbg "struct-type: ~S~%" type)
+                               (setf init-size dimensions)
                                array))
                          (progn
                            (multiple-value-bind (array dimensions)
-                               (to-lisp-array base-type name1 value)
+                               (to-lisp-array type base-type name1 value)
+                             (when type
+                               (unless (array-type-dimensions type)
+                                 (setf (array-type-dimensions type)
+                                       (if (listp dimensions)
+                                           dimensions
+                                           (list dimensions)))))
+                             (dbg "set dimensions to: ~S~%" dimensions)
+                             (dbg "array-type: ~S~%" type)
                              (setf init-size dimensions)
-                             array))
-                         #+nil ;; ...
-                         (progn (setf init-size (length els))
-                                `(vacietis::make-memptr :mem ,els))))
+                             array))))
                    (progn
                      (when (and (listp value) (eq 'string-to-char* (car value)))
                        (setf init-size (1+ (length (second value)))))
@@ -999,22 +1246,27 @@
                    (destructuring-bind (qualifier name1 &optional val/size)
                        x
                      (setf name name1)
+                     #+nil
+                     (unless (eq 'vacietis.c:alien[] qualifier)
+                       (setq val/size name1)
+                       (setq name1 name0))
                      (dbg "qualifier: ~S~%" qualifier)
-                     (case qualifier
-                       (vacietis.c:=
-                        (setf initial-value (init-object name1 val/size))
-                        (parse-declaration name1))
-                       (vacietis.c:[]
+                     (cond
+                       ((eq 'vacietis.c:= qualifier)
+                        (parse-declaration name1)
+                        (setf initial-value (init-object name1 val/size)))
+                       ((or (eq 'vacietis.c:[] qualifier) (eq 'vacietis.c:alien[] qualifier))
                         (setf type
                               (make-array-type
+                               :in-struct *in-struct*
                                :element-type type
                                :dimensions   (awhen (or val/size init-size)
                                                (dbg "array dimensions: ~S~%" it)
-                                               (if (listp it)
-                                                   (list (eval it))
-                                                   (list it)))))
+                                               (when (arithmetic-expression? it)
+                                                 (list (eval it))))))
+                        (dbg "array set type to ~S~%" type)
                         (parse-declaration name))
-                       (vacietis.c:deref*
+                       ((eq 'vacietis.c:deref* qualifier)
                         (setf type (make-pointer-to :type type))
                         (dbg "set type to ~S~%" type)
                         ;;XXX what about actual pointers to pointers?
@@ -1028,6 +1280,7 @@
       (parse-declaration spec)
       (values name type initial-value))))
 
+(defvar *is-inline*)
 (defvar *is-extern*)
 (defvar *is-const*)
 (defvar *is-unsigned*)
@@ -1038,12 +1291,14 @@
          (decl-code  ()))
     (setf (aref decls 0) (concatenate 'vector spec-so-far (aref decls 0)))
     ;;(dbg "rvd: spec-so-far: ~S ~S~%" spec-so-far base-type)
-    (loop for x across decls do
-         (dbg "processing variable declaration of ~S with base-type ~S~%" x base-type)
+    (loop for x across decls
+       do (dbg "processing variable declaration~%")
+       ;;do (dbg "processing variable declaration of ~S with base-type ~S~%" x base-type)
+       do
          (multiple-value-bind (name type initial-value)
              (process-variable-declaration (parse-infix x 0 (length x) base-type) base-type)
            (dbg "setting local-var-type of ~S  (extern: ~S)  to ~S~%" name *is-extern* type)
-           (dbg "  -> initial-value: ~S~%" initial-value)
+           ;;(dbg "  -> initial-value: ~S~%" initial-value)
            (setf (gethash name (or *local-var-types*
                                    (compiler-state-var-types *compiler-state*)))
                  type)
@@ -1054,13 +1309,13 @@
                             *variable-declarations*)
                       (push (lisp-type-declaration-for type name)
                             *variable-lisp-type-declarations*)
-                      (dbg "variable decl: ~S~%" (list type name (preallocated-value-exp-for type)))
+                      (dbg "variable declaration: ~S ~S~%" type name)
                       #+nil
                       (when initial-value
                         (push `(vacietis.c:= ,name ,initial-value)
                               decl-code)))
                (unless *is-extern*
-                 (dbg "global ~S type: ~S initial-value: ~S~%" name type initial-value)
+                 ;;(dbg "global ~S type: ~S initial-value: ~S~%" name type initial-value)
                  (let* ((defop 'defparameter)
                         (varname name)
                         (varvalue (or initial-value
@@ -1069,8 +1324,17 @@
                    (dbg "declamation: ~S~%" declamation)
                    (push declamation
                          decl-code)
-                   (push `(,defop ,varname
-                            ,varvalue)
+                   (push `(locally (declare
+                                    ;;(optimize (speed 1) (safety 1) (debug 3))
+                                    (optimize (speed 3) (safety 0) (debug 0))
+                                    )
+                            (,defop ,varname
+                                ,varvalue
+                                #+nil
+                                ,(if (and (listp varvalue)
+                                          (eq 'vacietis::array-backed-alien-array (car varvalue)))
+                                     `(array-backed-alien-cast ,varvalue ,(alien-type-for type))
+                                     varvalue)))
                          decl-code)
                    #+nil
                    (push declamation
@@ -1133,6 +1397,8 @@
        (case token
          ('vacietis.c:extern
           (setq *is-extern* t))
+         ('vacietis.c:inline
+          (setq *is-inline* t))
          ('vacietis.c:unsigned
           (setq *is-unsigned* t))
          ('vacietis.c:const
@@ -1158,18 +1424,21 @@
          (read-error "Unexpected parser error: unknown type ~A" token))))
 
 (defun read-struct-decl-body (struct-type)
-  (let ((i 0))
+  (let ((i 0)
+        (*in-struct* t))
     (loop for c = (next-char) until (eql #\} c) do
          (multiple-value-bind (slot-name slot-type)
              (let ((base-type (read-base-type (read-c-exp c))))
                (process-variable-declaration (read-infix-exp (next-exp))
                                              base-type))
+           (dbg "struct-type: ~S slot-name ~A i: ~D~%" struct-type slot-name i)
            (setf (gethash (format nil "~A.~A" (slot-value struct-type 'name) slot-name)
                           (compiler-state-accessors *compiler-state*))
-                 i
+                 (if *use-alien-types* slot-name i)
+                 (struct-type-slot-names struct-type)
+                 (append (struct-type-slot-names struct-type) (list slot-name))
                  (struct-type-slots struct-type)
                  (append (struct-type-slots struct-type) (list slot-type)))
-           ;;(dbg "struct-type: ~S slot-name ~A i: ~D~%" struct-type slot-name i)
            ;; use a vector
            (incf i)
            #+nil
@@ -1226,7 +1495,8 @@
                   (base-type (read-base-type (next-exp))))
              (read-typedef base-type))))
         ((c-type? token)
-         (let* ((*is-extern* nil)
+         (let* ((*is-inline* nil)
+                (*is-extern* nil)
                 (*is-const* nil)
                 (*is-unsigned* nil))
            (multiple-value-bind (base-type is-decl)
@@ -1278,7 +1548,7 @@
                         ((every #'lower-case-p raw-name-alphas) "~:@(~A~)")
                         (t "~A"))
                   raw-name)))
-    ;;(format t "identifier-name: ~S~%" identifier-name)
+    ;;(dbg "identifier-name: ~S~%" identifier-name)
     (let ((symbol (or (find-symbol identifier-name '#:vacietis.c)
                       (intern identifier-name)
                       ;;(intern (string-upcase identifier-name))

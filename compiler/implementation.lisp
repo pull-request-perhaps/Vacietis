@@ -113,6 +113,74 @@
 (defun allocate-memory (size)
   (make-memptr :mem (make-array size :adjustable t :initial-element 0)))
 
+(defstruct c-sap
+  (sap (sb-sys:int-sap 0) :type sb-sys:system-area-pointer)
+  (buffer nil))
+
+(defvar *c-saps* (make-hash-table :weakness :key))
+
+(defun print-c-saps ()
+  (maphash (lambda (k v)
+             (let ((buffer v))
+               (format t "~S ~S~%"
+                       k
+                       (array-dimensions buffer))))
+           *c-saps*))
+
+(defmacro with-all-c-saps-pinned (&body body)
+  (let ((keys))
+    (maphash (lambda (k v)
+               (declare (ignore v))
+               (push k keys))
+             *c-saps*)
+    `(with-array-backed-saps (,@keys)
+       ,@body)))
+
+(defun array-backed-sap (size)
+  (let* ((buffer (make-array size :element-type '(unsigned-byte 8))))
+    (sb-sys:with-pinned-objects (buffer)
+      (let* ((obj-address (sb-kernel:get-lisp-obj-address buffer))
+             (address (logandc2 obj-address sb-vm:lowtag-mask))
+             (data-address (+ (* 2 sb-vm:n-word-bytes) address))
+             (sap (sb-sys:int-sap data-address)))
+        (let ((c-sap (make-c-sap :sap sap)))
+          ;;(setf (gethash c-sap *array-backed-alien-arrays*) buffer)
+          ;;(setf (gethash sap *array-backed-c-saps*) c-sap)
+          (setf (gethash c-sap *c-saps*) buffer)
+          ;;(setf (gethash sap *array-backed-alien-arrays*) buffer)
+          c-sap)))))
+
+(defmacro with-array-backed-saps ((&rest saps) &body body)
+  (let ((n (length saps))
+        (sap-syms (map 'list (lambda (x) (declare (ignore x)) (gensym)) saps))
+        (buffer-syms (map 'list (lambda (x) (declare (ignore x)) (gensym)) saps))
+        (obj-address (gensym))
+        (address (gensym))
+        (data-address (gensym)))
+    `(let* (,@(loop for i from 0 upto (1- n)
+                 collect
+                   (let ((sap-sym (nth i sap-syms))
+                         (c-sap (nth i saps)))
+                     `(,sap-sym ,c-sap)))
+            ,@(loop for i from 0 upto (1- n)
+                 collect
+                   (let ((sap-sym (nth i sap-syms))
+                         (buffer-sym (nth i buffer-syms)))
+                     `(,buffer-sym (gethash ,sap-sym *c-saps*))))
+            ;;(,sap-sym ,c-sap)
+            ;;(,buffer-sym (gethash ,sap-sym *c-saps*))
+            )
+       (sb-sys:with-pinned-objects (,@buffer-syms)
+         ,@(loop for i from 0 upto (1- n)
+              collect
+                (let ((sap-sym (nth i sap-syms))
+                      (buffer-sym (nth i buffer-syms)))
+                  `(let* ((,obj-address (sb-kernel:get-lisp-obj-address ,buffer-sym))
+                          (,address (logandc2 ,obj-address sb-vm:lowtag-mask))
+                          (,data-address (+ (* 2 sb-vm:n-word-bytes) ,address)))
+                     (setf (c-sap-sap ,sap-sym) (sb-sys:int-sap ,data-address)))))
+         ,@body))))
+
 (defstruct place-ptr
   offset
   variable
@@ -257,7 +325,9 @@
 (defun vacietis.c:deref* (ptr)
   ;;(dbg "deref*: ~S~%" ptr)
   (etypecase ptr
-    (place-ptr (place-ptr-closure ptr))
+    (place-ptr (let ((value (place-ptr-closure ptr)))
+                 ;;(dbg "  -> ~S~%" value)
+                 value))
     (simple-array (aref ptr 0))
     (function ptr)))
 

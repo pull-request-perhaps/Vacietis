@@ -534,3 +534,15 @@ argv[1] = \"12345\";
 main(2, argv);
 "
            5)
+
+(eval-test main-args-[]access "
+#include <string.h>
+int main (int argc, char *argv[]) {
+  return strlen(argv[argc-1]);
+}
+char *argv[2];
+argv[0] = \"main\";
+argv[1] = \"12345\";
+main(2, argv);
+"
+           5)
