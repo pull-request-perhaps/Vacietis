@@ -1,3 +1,7 @@
+(in-package #:vacietis)
+
+(declaim (optimize (speed 3) (debug 0) (safety 1)))
+
 (in-package :sb-c)
 
 (defmacro sbcl%fast-truncl (x)
@@ -22,8 +26,6 @@
           (make-double-float high low))))))
 
 (in-package #:vacietis)
-
-(declaim (optimize (speed 3) (debug 0) (safety 1)))
 
 (defmacro macroexpansion-of (form &environment env)
   `',(sb-cltl2:macroexpand-all form env))
@@ -186,7 +188,7 @@
                                 test
                                 step)
                                &body body)
-                (dbg ".c:for...: ~S~%" (list variable-declarations initialization test step body))
+                ;;(dbg ".c:for...: ~S~%" (list variable-declarations initialization test step body))
                 `(let* (,@variable-declarations)
                    (vacietis::do-tagbody
                        ,@(awhen initialization (list it))
@@ -202,11 +204,19 @@
 
 
 (defmacro vac-progn/1 (body)
-  (dbg "body: ~S~%" body)
+  (dbg "vac-progn/1 body: ~S~%" body)
   `(vac-override
-    (let ((expanded-body (macroexpansion-of ,body)))
-      (dbg "expanded-body: ~S~%" expanded-body)
-      (eval expanded-body))))
+     (let ((expanded-body (macroexpansion-of ,body))
+           (return-value))
+       (dbg "vac-progn/1 expanded-body: ~S~%" expanded-body)
+       (dbg "vac-progn/1 compiling...")
+       ;;(eval expanded-body)
+       (let ((compiled (compile nil `(lambda ()
+                                       ,expanded-body))))
+         (dbg "done.~%")
+         (setq return-value (funcall compiled)))
+       (dbg "vac-progn/1 returning.~%")
+       return-value)))
 
 
 (defmacro vac-defun/1 (name arglist &body body)
@@ -216,17 +226,15 @@
         (body (loop for x in body
                  when (not (and (listp x) (eq 'declare (car x))))
                  collect x)))
-    (dbg "decl: ~S~%" declarations)
-    (dbg "body: ~S~%" body)
+    (dbg "vac-defun/1 decl: ~S~%" declarations)
+    (dbg "vac-defun/1 body: ~S~%" body)
     `(vac-override
        (let ((expanded-body (macroexpansion-of ,@body)))
-         (dbg "~A ~S~%~S~%~S~%"
+         (dbg "vac-defun/1 name: ~A arglist: ~S~%~S~%~S~%"
               ',name ',arglist
               ',declarations
               expanded-body)
          (eval (append nil (list 'defun ',name ',arglist
-                                 '(declare (optimize (speed 3) (debug 0) (safety 0)))
-                                 ;;'(declare (optimize (speed 3)))
-                                 ;;'(declare (optimize (debug 3)))
+                                 (list 'declare *optimize*)
                                  (when ',declarations ',@declarations)
                                  expanded-body)))))))

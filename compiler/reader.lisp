@@ -5,6 +5,10 @@
 ;;(declaim (optimize (debug 3)))
 (declaim (optimize (speed 3) (debug 0) (safety 1)))
 
+;;(defparameter *optimize* '(optimize (speed 0) (debug 3) (safety 3)))
+;;(defparameter *optimize* '(optimize (speed 3) (debug 0) (safety 1)))
+(defparameter *optimize* '(optimize (speed 3) (debug 0) (safety 0)))
+
 (in-package #:vacietis.c)
 
 (cl:defparameter vacietis::*type-qualifiers*
@@ -45,6 +49,11 @@
 (defvar %in)
 (defvar *c-file* nil)
 (defvar *line-number*  nil)
+
+(defvar *is-inline*)
+(defvar *is-extern*)
+(defvar *is-const*)
+(defvar *is-unsigned*)
 
 ;;; a C macro can expand to several statements; READ should return all of them
 
@@ -530,8 +539,8 @@
                                          (c-type-of-exp lvalue base-type)))
                            (r-c-type (c-type-of-exp rvalue))
                            (op (or op (aref exp i))))
-                       (dbg "  -> type of lvalue ~S is: ~S~%" lvalue l-c-type)
-                       (dbg "  -> type of rvalue ~S is: ~S~%" rvalue r-c-type)
+                       ;;(dbg "  -> type of lvalue ~S is: ~S~%" lvalue l-c-type)
+                       ;;(dbg "  -> type of rvalue ~S is: ~S~%" rvalue r-c-type)
                        (when (member op '(vacietis.c:|\|\|| vacietis.c:&&))
                          (when (integer-type? (c-type-of-exp lvalue))
                            (setq lvalue `(not (eql 0 ,lvalue))))
@@ -935,6 +944,7 @@
             (setq ftype nil))
           (dbg "result type of ~S: ~S~%" name result-type)
           (dbg "ftype: ~S~%" ftype)
+          (verbose "function ~S~%" ftype)
           (setf (gethash name (compiler-state-functions *compiler-state*))
                 (make-c-function :return-type result-type
                                  :inline *is-inline*))
@@ -958,6 +968,29 @@
              (t
               (list x)))))
 
+(defun get-alien-value-types (type)
+  (cond
+    ((array-type-p type)
+     (let* ((dimensions   (lisp-array-dimensions type))
+            (element-type (lisp-array-element-type type))
+            (depth        (1- (length dimensions)))
+            (indices      (make-list (1+ depth) :initial-element 0)))
+       (labels ((do-nth-dimension (n)
+                  (loop for j below (nth n dimensions)
+                     do (setf (nth n indices) j)
+                     collect (if (= n depth)
+                                 (get-alien-value-types element-type)
+                                 (do-nth-dimension (1+ n))))))
+         (do-nth-dimension 0))))
+    ((struct-type-p type)
+     (map-struct-slots
+      (lambda (name type)
+        (declare (ignore name))
+        (get-alien-value-types type))
+      type))
+    (t
+     type)))
+
 (defun set-alien-values (type alien next-value next-offset)
   (cond
     ((array-type-p type)
@@ -970,7 +1003,7 @@
                   (loop for j below (nth n dimensions)
                      do (setf (nth n indices) j)
                      collect (if (= n depth)
-                                 (let ((indexen (copy-list indices)))
+                                 (let (#+nil (indexen (copy-list indices)))
                                    (set-alien-values element-type
                                                      alien
                                                      #+nil
@@ -982,6 +1015,7 @@
      `(progn
         ,@(map-struct-slots
            (lambda (name type)
+             (declare (ignore name))
              (set-alien-values type
                                alien
                                #+nil
@@ -991,7 +1025,9 @@
     (t
      ;;(dbg "set-alien-values type: ~S~%" type)
      (let ((setter (sap-set-ref-for type)))
-       `(,setter ,alien ,(funcall next-offset type) ,(funcall next-value type)))
+       `(,setter ,alien
+                 ,(funcall next-offset type)
+                 (the ,(lisp-type-for type) ,(funcall next-value type))))
      #+nil
      `(setf ,alien ,(funcall next-value type)))))
 
@@ -1015,6 +1051,8 @@
                        (t
                         value))
      nconc (cond
+             ((null x)
+              nil)
              ((vector-literal-p x)
               (flatten-vector-literal x))
              ((atom x)
@@ -1041,14 +1079,41 @@
        ;;(dbg "expanded-body: ~S~%" expanded-body)
        (eval expanded-body))))
 
+(defun convert-to-alien-value-function (type)
+  (let ((offset 0)
+        (n-elements 0))
+    (labels ((next-value (type)
+               (declare (ignore type))
+               `(pop elements))
+             (next-offset (type)
+               (prog1 `(+ offset ,offset)
+                 (incf n-elements)
+                 (incf offset (eval `(sb-alien:alien-size ,(alien-type-for type) :bytes))))))
+      (values
+       `(lambda (sap offset elements)
+          (declare ,*optimize*
+                   (type sb-sys:system-area-pointer sap)
+                   (type fixnum offset)
+                   (type list elements))
+          ,(one-long-progn (set-alien-values type 'sap #'next-value #'next-offset)))
+       n-elements))))
+
+(defvar *alien-value-ctr* 0)
+(defvar *alien-value-table* (make-hash-table :weakness :value))
+
 (defun convert-to-alien-value (type value)
-  (let ((c-sap (gensym))
-        (sap (gensym))
-        (offset 0)
-        (size (gensym))
-        (alien-type (alien-type-for type))
-        (elements (flatten-vector-literal value)))
+  (let* ((c-sap (gensym))
+         (sap (gensym))
+         (offset 0)
+         (size (gensym))
+         (alien-type (alien-type-for type))
+         (alien-value-ctr (incf *alien-value-ctr*))
+         (elements (flatten-vector-literal value))
+         (elements-are-constant (arithmetic-expression? elements)))
     (dbg "convert-to-alien: alien type: ~S~%" alien-type)
+    (dbg "  -> elements-are-constant: ~S~%" (if elements-are-constant t nil))
+    (when elements-are-constant
+      (setq elements (eval (list* 'list elements))))
     ;;(dbg "convert-to-alien: flattened: ~S~%" elements)
     (labels ((next-value (type)
                (let ((value (pop elements)))
@@ -1058,21 +1123,71 @@
                    ((and (constantp value) (numberp value))
                     (lisp-constant-value-for type value))
                    ((vac-arithmetic-expression? value)
-                    ;;(dbg "is vac-arith...~%")
                     (eval `(evaluate-arithmetic-expression ,value)))
                    (t
                     value))))
              (next-offset (type)
                (prog1 offset
                  (incf offset (eval `(sb-alien:alien-size ,(alien-type-for type) :bytes))))))
-      `(locally
-           (declare (optimize (speed 3) (safety 0) (debug 0)))
-         (let* ((,size (sb-alien:alien-size ,alien-type :bytes))
-                (,c-sap (array-backed-sap ,size)))
-           (with-array-backed-saps (,c-sap)
-             (let ((,sap (c-sap-sap ,c-sap)))
+      (if (array-type-p type)
+          (let* ((idx (gensym))
+                 (offset (gensym))
+                 (all-elements (gensym))
+                 (element-size (gensym))
+                 (convert-one (gensym))
+                 (element-type (array-type-element-type type))
+                 (alien-element-type (alien-type-for element-type)))
+            (dbg "  -> array dimensions: ~S~%" (array-type-dimensions type))
+            (when elements-are-constant
+              (let ((types (get-alien-value-types element-type)))
+                (when (atom types)
+                  (setq types (list types)))
+                (dbg "  -> types: ~S~%" (get-alien-value-types element-type))
+                (let* ((loop-types types)
+                       (elements
+                       (loop
+                          for value = (let ((type (car loop-types)))
+                                        (when (endp loop-types)
+                                          (setq loop-types types))
+                                        (next-value type))
+                          while value
+                          collect value)))
+                  ;;(format t " -> elements: ~S~%" elements)
+                  (setf (gethash alien-value-ctr *alien-value-table*) elements))))
+            (multiple-value-bind (convert-one-form n-elements)
+                (convert-to-alien-value-function element-type)
+              `(locally
+                   (declare ,*optimize*)
+                 (let* ((,size (sb-alien:alien-size ,alien-type :bytes))
+                        (,element-size (sb-alien:alien-size ,alien-element-type :bytes))
+                        (,offset 0)
+                        (,c-sap (array-backed-sap ,size)))
+                   (labels ((,convert-one ,@(cdr convert-one-form)))
+                     (with-array-backed-saps (,c-sap)
+                       (let ((,sap (c-sap-sap ,c-sap))
+                             (,all-elements
+                              ,(if elements-are-constant
+                                   `(gethash ,alien-value-ctr *alien-value-table*)
+                                   (list* 'list elements))))
+                         (loop for ,idx from 0 upto ,(1- (car (array-type-dimensions type)))
+                            while ,all-elements
+                            do (progn
+                                 ;;(format t "(convert-one '(~S)~%" (subseq ,all-elements 0 ,(1- n-elements)))
+                                 (,convert-one
+                                  ,sap
+                                  ,offset
+                                  ,all-elements)
+                                 (setq ,all-elements (nthcdr ,n-elements ,all-elements))
+                                 (incf ,offset ,element-size)))
+                         ,c-sap)))))))
+          `(locally
+               (declare ,*optimize*)
+             (let* ((,size (sb-alien:alien-size ,alien-type :bytes))
+                    (,c-sap (array-backed-sap ,size)))
+               (with-array-backed-saps (,c-sap)
+                 (let ((,sap (c-sap-sap ,c-sap)))
                ,(one-long-progn (set-alien-values type sap #'next-value #'next-offset))))
-           ,c-sap)))))
+               ,c-sap))))))
 
 (defun to-struct-value (type value)
   (if *use-alien-types*
@@ -1280,11 +1395,6 @@
       (parse-declaration spec)
       (values name type initial-value))))
 
-(defvar *is-inline*)
-(defvar *is-extern*)
-(defvar *is-const*)
-(defvar *is-unsigned*)
-
 (defun read-variable-declarations (spec-so-far base-type)
   (let* ((*variable-declarations-base-type* base-type)
          (decls      (c-read-delimited-list #\; #\,))
@@ -1322,12 +1432,11 @@
                                       (preallocated-value-exp-for type)))
                         (declamation `(declaim (type ,(lisp-type-for type) ,varname))))
                    (dbg "declamation: ~S~%" declamation)
+                   (verbose "global ~S~%" declamation)
                    (push declamation
                          decl-code)
                    (push `(locally (declare
-                                    ;;(optimize (speed 1) (safety 1) (debug 3))
-                                    (optimize (speed 3) (safety 0) (debug 0))
-                                    )
+                                    ,*optimize*)
                             (,defop ,varname
                                 ,varvalue
                                 #+nil

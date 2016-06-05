@@ -32,6 +32,10 @@
 (defmacro dbg (&rest rest)
   `(when *debug*
      (format t ,@rest)))
+(defparameter *verbose* nil)
+(defmacro verbose (&rest rest)
+  `(when *verbose*
+     (format t ,@rest)))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defreadtable vacietis ;; defreadtable isn't eval-whened, grrr

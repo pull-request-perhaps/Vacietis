@@ -114,25 +114,61 @@
   (make-memptr :mem (make-array size :adjustable t :initial-element 0)))
 
 (defstruct c-sap
-  (sap (sb-sys:int-sap 0) :type sb-sys:system-area-pointer)
-  (buffer nil))
+  (sap (sb-sys:int-sap 0) :type (or null sb-sys:system-area-pointer))
+  (id nil))
+
+(defmethod make-load-form ((self c-sap) &optional environment)
+  (make-load-form-saving-slots self
+                               :slot-names '(id)
+                               :environment environment))
 
 (defvar *c-saps* (make-hash-table :weakness :key))
+(defvar *interned-c-saps* (make-hash-table :weakness :value))
+
+(defvar *c-sap-id-counter* 0)
+(defvar *gen-c-sap-id-mutex* (sb-thread:make-mutex :name "GEN-C-SAP-ID-MUTEX"))
+(defun gen-c-sap-id ()
+  (sb-thread:with-mutex (*gen-c-sap-id-mutex*)
+    (prog1 *c-sap-id-counter*
+      (incf *c-sap-id-counter*))))
 
 (defun print-c-saps ()
-  (maphash (lambda (k v)
-             (let ((buffer v))
-               (format t "~S ~S~%"
-                       k
-                       (array-dimensions buffer))))
+  (maphash (lambda (k buffer)
+             (let* ((dimensions (array-dimensions buffer))
+                    (size (car dimensions))
+                    (print-size (min 16 size))
+                    (data (apply #'concatenate
+                                 'string
+                                 (loop for i from 0 upto (1- print-size)
+                                    collect (format nil "~2,'0X" (aref buffer i))))))
+               (format t "~S ~S ~10D ~A~%"
+                       (c-sap-id k)
+                       (c-sap-sap k)
+                       size
+                       data)))
            *c-saps*))
 
+(defun print-c-sap-ids ()
+  (maphash (lambda (id c-sap)
+             (let* ((buffer (gethash c-sap *c-saps*))
+                    (dimensions (array-dimensions buffer))
+                    (size (car dimensions)))
+               (format t "~S : ~S ~S ~10D~%"
+                       id
+                       (c-sap-id c-sap)
+                       (c-sap-sap c-sap)
+                       size)))
+           *interned-c-saps*))
+
 (defmacro with-all-c-saps-pinned (&body body)
-  (let ((keys))
+  (let ((c-saps))
     (maphash (lambda (k v)
                (declare (ignore v))
-               (push k keys))
+               (push k c-saps))
              *c-saps*)
+    `(with-array-backed-sap-ids (,@(mapcar #'c-sap-id c-saps))
+       ,@body)
+    #+nil
     `(with-array-backed-saps (,@keys)
        ,@body)))
 
@@ -144,10 +180,9 @@
              (data-address (+ (* 2 sb-vm:n-word-bytes) address))
              (sap (sb-sys:int-sap data-address)))
         (let ((c-sap (make-c-sap :sap sap)))
-          ;;(setf (gethash c-sap *array-backed-alien-arrays*) buffer)
-          ;;(setf (gethash sap *array-backed-c-saps*) c-sap)
           (setf (gethash c-sap *c-saps*) buffer)
-          ;;(setf (gethash sap *array-backed-alien-arrays*) buffer)
+          (setf (c-sap-id c-sap) (gen-c-sap-id))
+          (setf (gethash (c-sap-id c-sap) *interned-c-saps*) c-sap)
           c-sap)))))
 
 (defmacro with-array-backed-saps ((&rest saps) &body body)
@@ -166,10 +201,7 @@
                  collect
                    (let ((sap-sym (nth i sap-syms))
                          (buffer-sym (nth i buffer-syms)))
-                     `(,buffer-sym (gethash ,sap-sym *c-saps*))))
-            ;;(,sap-sym ,c-sap)
-            ;;(,buffer-sym (gethash ,sap-sym *c-saps*))
-            )
+                     `(,buffer-sym (gethash ,sap-sym *c-saps*)))))
        (sb-sys:with-pinned-objects (,@buffer-syms)
          ,@(loop for i from 0 upto (1- n)
               collect
@@ -177,7 +209,35 @@
                       (buffer-sym (nth i buffer-syms)))
                   `(let* ((,obj-address (sb-kernel:get-lisp-obj-address ,buffer-sym))
                           (,address (logandc2 ,obj-address sb-vm:lowtag-mask))
-                          (,data-address (+ (* 2 sb-vm:n-word-bytes) ,address)))
+                          (,data-address (the fixnum (+ (* 2 sb-vm:n-word-bytes) ,address))))
+                     (setf (c-sap-sap ,sap-sym) (sb-sys:int-sap ,data-address)))))
+         ,@body))))
+
+(defmacro with-array-backed-sap-ids ((&rest sap-ids) &body body)
+  (let ((n (length sap-ids))
+        (sap-syms (map 'list (lambda (x) (declare (ignore x)) (gensym)) sap-ids))
+        (buffer-syms (map 'list (lambda (x) (declare (ignore x)) (gensym)) sap-ids))
+        (obj-address (gensym))
+        (address (gensym))
+        (data-address (gensym)))
+    `(let* (,@(loop for i from 0 upto (1- n)
+                 collect
+                   (let ((sap-sym (nth i sap-syms))
+                         (id (nth i sap-ids)))
+                     `(,sap-sym (gethash ,id *interned-c-saps*))))
+            ,@(loop for i from 0 upto (1- n)
+                 collect
+                   (let ((sap-sym (nth i sap-syms))
+                         (buffer-sym (nth i buffer-syms)))
+                     `(,buffer-sym (gethash ,sap-sym *c-saps*)))))
+       (sb-sys:with-pinned-objects (,@buffer-syms)
+         ,@(loop for i from 0 upto (1- n)
+              collect
+                (let ((sap-sym (nth i sap-syms))
+                      (buffer-sym (nth i buffer-syms)))
+                  `(let* ((,obj-address (sb-kernel:get-lisp-obj-address ,buffer-sym))
+                          (,address (logandc2 ,obj-address sb-vm:lowtag-mask))
+                          (,data-address (the fixnum (+ (* 2 sb-vm:n-word-bytes) ,address))))
                      (setf (c-sap-sap ,sap-sym) (sb-sys:int-sap ,data-address)))))
          ,@body))))
 
