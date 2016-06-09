@@ -10,4 +10,5 @@
   (accessors (make-hash-table :test #'equal))
   (enums     (make-hash-table))
   (functions (make-hash-table))
+  (variables (make-hash-table))
   (var-types (make-hash-table)))

@@ -1,7 +1,8 @@
 (in-package #:vacietis)
 (in-readtable vacietis)
 
-(declaim (optimize (debug 3)))
+;;(declaim (optimize (debug 3)))
+(declaim (optimize (speed 3) (debug 0) (safety 1)))
 
 ;;; unary operators
 
@@ -50,35 +51,256 @@
 
 ;;; pointers, storage units and allocation
 
+(defstruct c-pointer
+  (sap (sb-sys:int-sap 0) :type (or null sb-sys:system-area-pointer))
+  (offset 0 :type fixnum)
+  (id 0 :type fixnum))
+
+(defmethod make-load-form ((self c-pointer) &optional environment)
+  (make-load-form-saving-slots self
+                               :slot-names '(offset id)
+                               :environment environment))
+
+(declaim (inline sap-ref-c-pointer))
+(defun sap-ref-c-pointer (sap offset)
+  (declare (optimize (speed 3) (debug 0) (safety 0))
+           (type sb-sys:system-area-pointer sap)
+           (type fixnum offset))
+  (let* ((r-sap    (sb-sys:sap-ref-word sap offset))
+         (r-offset (sb-sys:sap-ref-word sap (+ offset sb-vm:n-word-bytes)))
+         (r-id     (sb-sys:sap-ref-word sap (+ offset (* 2 sb-vm:n-word-bytes)))))
+    (make-c-pointer :sap (sb-sys:int-sap r-sap)
+                    :offset r-offset
+                    :id r-id)))
+
+(declaim (inline (setf sap-ref-c-pointer)))
+(defun (setf sap-ref-c-pointer) (new-value sap offset)
+  (declare (optimize (speed 3) (debug 0) (safety 0))
+           (type sb-sys:system-area-pointer sap)
+           (type fixnum offset))
+  (let* ((w-sap    (c-pointer-sap new-value))
+         (w-offset (c-pointer-offset new-value))
+         (w-id     (c-pointer-id new-value)))
+    (sb-kernel:%set-sap-ref-word sap offset (sb-sys:sap-int w-sap))
+    (sb-kernel:%set-sap-ref-word sap (+ offset sb-vm:n-word-bytes) w-offset)
+    (sb-kernel:%set-sap-ref-word sap (+ offset (* 2 sb-vm:n-word-bytes)) w-id)))
+
+(defvar *c-pointers* (make-hash-table :weakness :key))
+(defvar *interned-c-pointers* (make-hash-table :weakness :value))
+
+(defvar *c-pointer-id-counter* 1)
+(defvar *gen-c-pointer-id-mutex* (sb-thread:make-mutex :name "GEN-C-POINTER-ID-MUTEX"))
+(defun gen-c-pointer-id ()
+  (sb-thread:with-mutex (*gen-c-pointer-id-mutex*)
+    (prog1 *c-pointer-id-counter*
+      (incf *c-pointer-id-counter*))))
+
+(defun print-c-pointers ()
+  (maphash (lambda (k buffer)
+             (let* ((dimensions (array-dimensions buffer))
+                    (size (car dimensions))
+                    (print-size (min 16 size))
+                    (data (apply #'concatenate
+                                 'string
+                                 (loop for i from 0 upto (1- print-size)
+                                    collect (format nil "~2,'0X" (aref buffer i))))))
+               (format t "~S ~S ~10D ~A~%"
+                       (c-pointer-id k)
+                       (c-pointer-sap k)
+                       size
+                       data)))
+           *c-pointers*))
+
+(defun print-c-pointer-ids ()
+  (maphash (lambda (id c-pointer)
+             (let* ((buffer (gethash c-pointer *c-pointers*))
+                    (dimensions (array-dimensions buffer))
+                    (size (car dimensions)))
+               (format t "~S : ~S ~S ~10D~%"
+                       id
+                       (c-pointer-id c-pointer)
+                       (c-pointer-sap c-pointer)
+                       size)))
+           *interned-c-pointers*))
+
+(defun dump-c-pointer (c-pointer bytes)
+  (let ((sap (c-pointer-sap c-pointer)))
+    (format t "~A"
+            (apply #'concatenate 'string
+                   (loop for i from 0 upto (1- bytes)
+                      collect (format nil "~2,'0X" (sb-sys:sap-ref-8 sap i)))))))
+
+(defmacro with-all-c-pointers-pinned (&body body)
+  (let ((c-pointers))
+    (maphash (lambda (k v)
+               (declare (ignore v))
+               (push k c-pointers))
+             *c-pointers*)
+    `(with-array-backed-c-pointer-ids (,@(mapcar #'c-pointer-id c-pointers))
+       ,@body)
+    #+nil
+    `(with-array-backed-c-pointers (,@keys)
+       ,@body)))
+
+(defpackage #:vacietis.runtime
+  (:use #:cl)
+  (:export
+   #:with-c
+   ))
+
+(defmacro vacietis.runtime:with-c (options &body body)
+  `(vacietis::with-all-c-pointers-pinned
+     ,@body))
+
+
+(defun array-backed-c-pointer (size)
+  ;; XXX pointers are 3 x word size
+  (setq size (* size 3))
+  (let* ((buffer (make-array size :element-type '(unsigned-byte 8))))
+    (sb-sys:with-pinned-objects (buffer)
+      (let* ((obj-address (sb-kernel:get-lisp-obj-address buffer))
+             (address (logandc2 obj-address sb-vm:lowtag-mask))
+             (data-address (+ (* 2 sb-vm:n-word-bytes) address))
+             (sap (sb-sys:int-sap data-address)))
+        (let ((c-pointer (make-c-pointer :sap sap)))
+          (setf (gethash c-pointer *c-pointers*) buffer)
+          (setf (c-pointer-id c-pointer) (gen-c-pointer-id))
+          (setf (gethash (c-pointer-id c-pointer) *interned-c-pointers*) c-pointer)
+          c-pointer)))))
+
+(defun array-backed-c-pointer-of (buffer)
+  (sb-sys:with-pinned-objects (buffer)
+    (let* ((obj-address (sb-kernel:get-lisp-obj-address buffer))
+           (address (logandc2 obj-address sb-vm:lowtag-mask))
+           (data-address (+ (* 2 sb-vm:n-word-bytes) address))
+           (sap (sb-sys:int-sap data-address)))
+      (let ((c-pointer (make-c-pointer :sap sap)))
+        (setf (gethash c-pointer *c-pointers*) buffer)
+        (setf (c-pointer-id c-pointer) (gen-c-pointer-id))
+        (setf (gethash (c-pointer-id c-pointer) *interned-c-pointers*) c-pointer)
+        c-pointer))))
+
+(defun c-pointer-of (obj)
+  (let* ((obj-address (sb-kernel:get-lisp-obj-address obj))
+         (address (logandc2 obj-address sb-vm:lowtag-mask))
+         (data-address (+ (* 0 sb-vm:n-word-bytes) address))
+         (sap (sb-sys:int-sap data-address)))
+    (format t " obj-address: ~X~%" obj-address)
+    (format t "     address: ~X~%" address)
+    (format t "data-address: ~X~%" data-address)
+    (let ((c-pointer (make-c-pointer :sap sap)))
+      ;;(setf (gethash c-pointer *c-pointers*) obj)
+      ;;(setf (c-pointer-id c-pointer) (gen-c-pointer-id))
+      ;;(setf (gethash (c-pointer-id c-pointer) *interned-c-pointers*) c-pointer)
+      c-pointer)))
+
+(defmacro with-array-backed-c-pointers ((&rest saps) &body body)
+  (let ((n (length saps))
+        (pointer-syms (map 'list (lambda (x) (declare (ignore x)) (gensym)) saps))
+        (buffer-syms (map 'list (lambda (x) (declare (ignore x)) (gensym)) saps))
+        (obj-address (gensym))
+        (address (gensym))
+        (data-address (gensym)))
+    `(let* (,@(loop for i from 0 upto (1- n)
+                 collect
+                   (let ((pointer-sym (nth i pointer-syms))
+                         (c-pointer (nth i saps)))
+                     `(,pointer-sym ,c-pointer)))
+            ,@(loop for i from 0 upto (1- n)
+                 collect
+                   (let ((pointer-sym (nth i pointer-syms))
+                         (buffer-sym (nth i buffer-syms)))
+                     `(,buffer-sym (gethash ,pointer-sym *c-pointers*)))))
+       (sb-sys:with-pinned-objects (,@buffer-syms)
+         ,@(loop for i from 0 upto (1- n)
+              collect
+                (let ((pointer-sym (nth i pointer-syms))
+                      (buffer-sym (nth i buffer-syms)))
+                  `(let* ((,obj-address (sb-kernel:get-lisp-obj-address ,buffer-sym))
+                          (,address (logandc2 ,obj-address sb-vm:lowtag-mask))
+                          (,data-address (the fixnum (+ (* 2 sb-vm:n-word-bytes) ,address))))
+                     (setf (c-pointer-sap ,pointer-sym) (sb-sys:int-sap ,data-address)))))
+         ,@body))))
+
+(defmacro with-array-backed-c-pointer-ids ((&rest sap-ids) &body body)
+  (let ((n (length sap-ids))
+        (pointer-syms (map 'list (lambda (x) (declare (ignore x)) (gensym)) sap-ids))
+        (buffer-syms (map 'list (lambda (x) (declare (ignore x)) (gensym)) sap-ids))
+        (obj-address (gensym))
+        (address (gensym))
+        (data-address (gensym)))
+    `(let* (,@(loop for i from 0 upto (1- n)
+                 collect
+                   (let ((pointer-sym (nth i pointer-syms))
+                         (id (nth i sap-ids)))
+                     `(,pointer-sym (gethash ,id *interned-c-pointers*))))
+            ,@(loop for i from 0 upto (1- n)
+                 collect
+                   (let ((pointer-sym (nth i pointer-syms))
+                         (buffer-sym (nth i buffer-syms)))
+                     `(,buffer-sym (gethash ,pointer-sym *c-pointers*)))))
+       (sb-sys:with-pinned-objects (,@buffer-syms)
+         ,@(loop for i from 0 upto (1- n)
+              collect
+                (let ((pointer-sym (nth i pointer-syms))
+                      (buffer-sym (nth i buffer-syms)))
+                  `(let* ((,obj-address (sb-kernel:get-lisp-obj-address ,buffer-sym))
+                          (,address (logandc2 ,obj-address sb-vm:lowtag-mask))
+                          (,data-address (the fixnum (+ (* 2 sb-vm:n-word-bytes) ,address))))
+                     (setf (c-pointer-sap ,pointer-sym) (sb-sys:int-sap ,data-address)))))
+         ,@body))))
+
 (defun string-to-char* (string)
   (let ((unicode (babel:string-to-octets string :encoding :utf-8)))
-    (make-array (1+ (length unicode))
-                :element-type '(signed-byte 8)
-                :initial-contents (concatenate '(simple-array (signed-byte 8) (*))
-                                               (map 'vector
-                                                    (lambda (c)
-                                                      (if (> c 127)
-                                                          (- (- c 127))
-                                                          c))
-                                                    unicode)
-                                               #(0)))))
+    (if *use-alien-types*
+        (let* ((size (1+ (length unicode)))
+               (c-pointer (array-backed-c-pointer size)))
+          (with-array-backed-c-pointers (c-pointer)
+            (sb-kernel:copy-ub8-to-system-area unicode 0 (c-pointer-sap c-pointer) 0 size))
+          c-pointer)
+        (make-array (1+ (length unicode))
+                    :element-type '(signed-byte 8)
+                    :initial-contents (concatenate '(simple-array (signed-byte 8) (*))
+                                                   (map 'vector
+                                                        (lambda (c)
+                                                          (if (> c 127)
+                                                              (- (- c 127))
+                                                              c))
+                                                        unicode)
+                                                   #(0))))))
 
 (defun string-to-unsigned-char* (string)
   (let ((unicode (babel:string-to-octets string :encoding :utf-8)))
-    (make-array (1+ (length unicode))
-                :element-type '(unsigned-byte 8)
-                :initial-contents (concatenate '(simple-array (unsigned-byte 8) (*))
-                                               unicode
-                                               #(0)))))
+    (if *use-alien-types*
+        (let* ((size (1+ (length unicode)))
+               (c-pointer (array-backed-c-pointer size)))
+          (with-array-backed-c-pointers (c-pointer)
+            (sb-kernel:copy-ub8-to-system-area unicode 0 (c-pointer-sap c-pointer) 0 size))
+          c-pointer)
+        (make-array (1+ (length unicode))
+                    :element-type '(unsigned-byte 8)
+                    :initial-contents (concatenate '(simple-array (unsigned-byte 8) (*))
+                                                   unicode
+                                                   #(0))))))
 
 (defun char*-to-string (char*)
-  (let* ((char*      (ensure-memptr char*))
-         (mem        (memptr-mem char*))
-         (start      (memptr-ptr char*))
-         (end        (or (position 0 mem :start start) (length mem)))
-         (byte-array (make-array (- end start) :element-type '(unsigned-byte 8))))
-    (replace byte-array mem :start2 start :end2 end)
-    (babel:octets-to-string byte-array :encoding :utf-8)))
+  (if *use-alien-types*
+      (with-array-backed-c-pointers (char*)
+        (let* ((sap (c-pointer-sap char*))
+               (length (loop for offset from 0
+                          for c = (sb-kernel::sap-ref-8 sap offset)
+                          when (= 0 c)
+                          return offset))
+               (byte-array (make-array length :element-type '(unsigned-byte 8))))
+          (sb-kernel:copy-ub8-from-system-area sap 0 byte-array 0 length)
+          (babel:octets-to-string byte-array :encoding :utf-8)))
+      (let* ((char*      (ensure-memptr char*))
+             (mem        (memptr-mem char*))
+             (start      (memptr-ptr char*))
+             (end        (or (position 0 mem :start start) (length mem)))
+             (byte-array (make-array (- end start) :element-type '(unsigned-byte 8))))
+        (replace byte-array mem :start2 start :end2 end)
+        (babel:octets-to-string byte-array :encoding :utf-8))))
 
 (defun make-memptr (&key mem)
   (make-place-ptr :variable mem
@@ -113,134 +335,6 @@
 (defun allocate-memory (size)
   (make-memptr :mem (make-array size :adjustable t :initial-element 0)))
 
-(defstruct c-sap
-  (sap (sb-sys:int-sap 0) :type (or null sb-sys:system-area-pointer))
-  (id nil))
-
-(defmethod make-load-form ((self c-sap) &optional environment)
-  (make-load-form-saving-slots self
-                               :slot-names '(id)
-                               :environment environment))
-
-(defvar *c-saps* (make-hash-table :weakness :key))
-(defvar *interned-c-saps* (make-hash-table :weakness :value))
-
-(defvar *c-sap-id-counter* 0)
-(defvar *gen-c-sap-id-mutex* (sb-thread:make-mutex :name "GEN-C-SAP-ID-MUTEX"))
-(defun gen-c-sap-id ()
-  (sb-thread:with-mutex (*gen-c-sap-id-mutex*)
-    (prog1 *c-sap-id-counter*
-      (incf *c-sap-id-counter*))))
-
-(defun print-c-saps ()
-  (maphash (lambda (k buffer)
-             (let* ((dimensions (array-dimensions buffer))
-                    (size (car dimensions))
-                    (print-size (min 16 size))
-                    (data (apply #'concatenate
-                                 'string
-                                 (loop for i from 0 upto (1- print-size)
-                                    collect (format nil "~2,'0X" (aref buffer i))))))
-               (format t "~S ~S ~10D ~A~%"
-                       (c-sap-id k)
-                       (c-sap-sap k)
-                       size
-                       data)))
-           *c-saps*))
-
-(defun print-c-sap-ids ()
-  (maphash (lambda (id c-sap)
-             (let* ((buffer (gethash c-sap *c-saps*))
-                    (dimensions (array-dimensions buffer))
-                    (size (car dimensions)))
-               (format t "~S : ~S ~S ~10D~%"
-                       id
-                       (c-sap-id c-sap)
-                       (c-sap-sap c-sap)
-                       size)))
-           *interned-c-saps*))
-
-(defmacro with-all-c-saps-pinned (&body body)
-  (let ((c-saps))
-    (maphash (lambda (k v)
-               (declare (ignore v))
-               (push k c-saps))
-             *c-saps*)
-    `(with-array-backed-sap-ids (,@(mapcar #'c-sap-id c-saps))
-       ,@body)
-    #+nil
-    `(with-array-backed-saps (,@keys)
-       ,@body)))
-
-(defun array-backed-sap (size)
-  (let* ((buffer (make-array size :element-type '(unsigned-byte 8))))
-    (sb-sys:with-pinned-objects (buffer)
-      (let* ((obj-address (sb-kernel:get-lisp-obj-address buffer))
-             (address (logandc2 obj-address sb-vm:lowtag-mask))
-             (data-address (+ (* 2 sb-vm:n-word-bytes) address))
-             (sap (sb-sys:int-sap data-address)))
-        (let ((c-sap (make-c-sap :sap sap)))
-          (setf (gethash c-sap *c-saps*) buffer)
-          (setf (c-sap-id c-sap) (gen-c-sap-id))
-          (setf (gethash (c-sap-id c-sap) *interned-c-saps*) c-sap)
-          c-sap)))))
-
-(defmacro with-array-backed-saps ((&rest saps) &body body)
-  (let ((n (length saps))
-        (sap-syms (map 'list (lambda (x) (declare (ignore x)) (gensym)) saps))
-        (buffer-syms (map 'list (lambda (x) (declare (ignore x)) (gensym)) saps))
-        (obj-address (gensym))
-        (address (gensym))
-        (data-address (gensym)))
-    `(let* (,@(loop for i from 0 upto (1- n)
-                 collect
-                   (let ((sap-sym (nth i sap-syms))
-                         (c-sap (nth i saps)))
-                     `(,sap-sym ,c-sap)))
-            ,@(loop for i from 0 upto (1- n)
-                 collect
-                   (let ((sap-sym (nth i sap-syms))
-                         (buffer-sym (nth i buffer-syms)))
-                     `(,buffer-sym (gethash ,sap-sym *c-saps*)))))
-       (sb-sys:with-pinned-objects (,@buffer-syms)
-         ,@(loop for i from 0 upto (1- n)
-              collect
-                (let ((sap-sym (nth i sap-syms))
-                      (buffer-sym (nth i buffer-syms)))
-                  `(let* ((,obj-address (sb-kernel:get-lisp-obj-address ,buffer-sym))
-                          (,address (logandc2 ,obj-address sb-vm:lowtag-mask))
-                          (,data-address (the fixnum (+ (* 2 sb-vm:n-word-bytes) ,address))))
-                     (setf (c-sap-sap ,sap-sym) (sb-sys:int-sap ,data-address)))))
-         ,@body))))
-
-(defmacro with-array-backed-sap-ids ((&rest sap-ids) &body body)
-  (let ((n (length sap-ids))
-        (sap-syms (map 'list (lambda (x) (declare (ignore x)) (gensym)) sap-ids))
-        (buffer-syms (map 'list (lambda (x) (declare (ignore x)) (gensym)) sap-ids))
-        (obj-address (gensym))
-        (address (gensym))
-        (data-address (gensym)))
-    `(let* (,@(loop for i from 0 upto (1- n)
-                 collect
-                   (let ((sap-sym (nth i sap-syms))
-                         (id (nth i sap-ids)))
-                     `(,sap-sym (gethash ,id *interned-c-saps*))))
-            ,@(loop for i from 0 upto (1- n)
-                 collect
-                   (let ((sap-sym (nth i sap-syms))
-                         (buffer-sym (nth i buffer-syms)))
-                     `(,buffer-sym (gethash ,sap-sym *c-saps*)))))
-       (sb-sys:with-pinned-objects (,@buffer-syms)
-         ,@(loop for i from 0 upto (1- n)
-              collect
-                (let ((sap-sym (nth i sap-syms))
-                      (buffer-sym (nth i buffer-syms)))
-                  `(let* ((,obj-address (sb-kernel:get-lisp-obj-address ,buffer-sym))
-                          (,address (logandc2 ,obj-address sb-vm:lowtag-mask))
-                          (,data-address (the fixnum (+ (* 2 sb-vm:n-word-bytes) ,address))))
-                     (setf (c-sap-sap ,sap-sym) (sb-sys:int-sap ,data-address)))))
-         ,@body))))
-
 (defstruct place-ptr
   offset
   variable
@@ -273,6 +367,13 @@
     (cond
       ((null place)
        nil)
+      ((and *use-alien-types*
+            (listp place)
+            (member (car place) '(aref vacietis.c:alien[])))
+       (multiple-value-bind (parsed offsets)
+           (parse-alien-accessor place)
+         (dbg "  -> PARSED: ~S  ~S~%" parsed offsets)
+         (error "XXX not implemented")))
       ((and (listp place)
             (member (car place) '(aref vacietis.c:[])))
        (let* ((variable (second place))
@@ -307,10 +408,11 @@
   (typecase x
     (place-ptr (place-ptr-offset x))
     (integer x)
+    (c-pointer 0)
     (t 0)))
 
 (defun %ptr+ (ptr x)
-  ;;(dbg "%ptr+: ~S ~S~%" ptr x)
+  (dbg "%ptr+: ~S ~S~%" ptr x)
   (cond
     ;; addition of pointers is not actually valid C
     ((and (place-ptr-p ptr) (place-ptr-p x))
@@ -338,6 +440,12 @@
            x
            (make-place-ptr :offset offset
                            :variable x))))
+    ((c-pointer-p ptr)
+     (let ((offset (ensure-place-ptr-offset x)))
+       (if (= 0 offset)
+           x
+           (make-place-ptr :offset offset
+                           :variable ptr))))
     (t
      (let ((offset (ensure-place-ptr-offset x)))
        (if (= 0 offset)

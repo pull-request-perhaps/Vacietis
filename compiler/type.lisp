@@ -37,6 +37,15 @@
   element-type
   dimensions)
 
+(defstruct c-variable
+  parameter
+  register
+  referenced
+  referenceable-name
+  referenceable-type
+  name
+  type)
+
 (defun type-size (type)
   (cond
     ((find type *basic-c-types*) 1)
@@ -67,12 +76,12 @@
   ;;(dbg "preallocated-value-exp-for: ~S~%" type)
   (cond
     ((and *use-alien-types* (or (array-type-p type) (struct-type-p type)))
-     (let ((c-sap (gensym))
+     (let ((c-pointer (gensym))
            (size (gensym))
            (alien-type (alien-type-for type)))
        `(let* ((,size (sb-alien:alien-size ,alien-type :bytes))
-               (,c-sap (array-backed-sap ,size)))
-          ,c-sap)))
+               (,c-pointer (array-backed-c-pointer ,size)))
+          ,c-pointer)))
     ((struct-type-p type)  `(make-array ,(length (struct-type-slots type))
                                         :element-type ',(unique-element-type-list type)
                                         :initial-contents (list ,@(mapcar #'preallocated-value-exp-for (struct-type-slots type)))))
@@ -89,9 +98,13 @@
     (if (array-type-p element-type)
         (%lisp-type-for-array-type element-type (append dimensions type-dimensions))
         (throw :found-type (list 'simple-array (lisp-type-for element-type)
-                                 (aif (append dimensions type-dimensions)
-                                      it
-                                      1))))))
+                                 (mapcar (lambda (x)
+                                           (if (null x)
+                                               '*
+                                               x))
+                                         (aif (append dimensions type-dimensions)
+                                              it
+                                              (list '*))))))))
 
 (defun lisp-type-for-array-type (type &optional dimensions)
   (catch :found-type
@@ -115,20 +128,57 @@
 (defun %lisp-array-dimensions (type &optional dimensions)
   (let ((element-type (array-type-element-type type))
         (type-dimensions (array-type-dimensions type)))
-    (if (array-type-p element-type)
-        (%lisp-array-dimensions element-type (append dimensions type-dimensions))
-        (throw :found-type (aif (append dimensions type-dimensions)
-                                it
-                                (list 1))))))
+    (cond
+      ((pointer-to-p element-type)
+       (throw :found-type (aif dimensions dimensions (list nil))))
+      (t
+       (if (array-type-p element-type)
+           (%lisp-array-dimensions element-type (append dimensions
+                                                        (aif type-dimensions
+                                                             it
+                                                             (list nil))))
+           (throw :found-type (aif (append dimensions (aif type-dimensions
+                                                             it
+                                                             (list nil)))
+                                   it
+                                   (list nil))))))))
 
 (defun lisp-array-dimensions (type &optional dimensions)
+  "Stops at a pointer type."
+  (if (pointer-to-p type)
+      (list nil)
+      (catch :found-type
+        (%lisp-array-dimensions type dimensions))))
+
+(defun %lisp-array-full-dimensions (type &optional dimensions)
+  "Complete dimensions including pointers."
+  (cond
+    ((pointer-to-p type)
+     (%lisp-array-full-dimensions (pointer-to-type type) (append dimensions (list nil))))
+    ((array-type-p type)
+     (let ((element-type (array-type-element-type type))
+           (type-dimensions (array-type-dimensions type)))
+       (%lisp-array-full-dimensions
+        element-type (append dimensions
+                             (aif type-dimensions
+                                  it
+                                  (list nil))))))
+    (t
+     (throw :found-type dimensions))))
+
+(defun lisp-array-full-dimensions (type &optional dimensions)
   (catch :found-type
-    (%lisp-array-dimensions type dimensions)))
+    (%lisp-array-full-dimensions type dimensions)))
 
 (defun %lisp-array-element-type (type &optional dimensions)
-  (let ((element-type (array-type-element-type type))
-        (type-dimensions (array-type-dimensions type)))
-    (if (array-type-p element-type)
+  (let ((element-type
+         (if (pointer-to-p type)
+             (pointer-to-type type)
+             (array-type-element-type type)))
+        (type-dimensions (if (pointer-to-p type)
+                             nil
+                             (array-type-dimensions type))))
+    (if (or (pointer-to-p element-type) (array-type-p element-type))
         (%lisp-array-element-type element-type (append dimensions type-dimensions))
         (throw :found-type element-type))))
 
@@ -182,14 +232,16 @@
   (cond
     ((and (struct-type-p type) *use-alien-types*)
      ;;'sb-sys:system-area-pointer
-     'c-sap
+     'c-pointer
      #+nil
      `(sb-alien:alien ,(alien-type-for type)))
     ((and (array-type-p type) *use-alien-types*)
      ;;'sb-sys:system-area-pointer
-     'c-sap
+     'c-pointer
      #+nil
      `(sb-alien:alien ,(alien-type-for type)))
+    ((and (pointer-to-p type) *use-alien-types*)
+     'c-pointer)
     ((struct-type-p type)
      `(simple-array ,(unique-element-type-list type)
                     (,(length (struct-type-slots type)))))
@@ -218,6 +270,7 @@
       (let ((lisp-type (lisp-type-for type)))
         (unless (eq t lisp-type)
           `(type ,lisp-type ,name)))
+      #+nil
       (when (vectorp type)
         (let* ((length (length type))
                (name (last-symbol-in-array type)))
@@ -238,7 +291,7 @@
                                                  (eq 'vacietis.c:[] (car x)))))
                                       type)))
                  (if *use-alien-types*
-                     `(type c-sap ,name)
+                     `(type c-pointer ,name)
                      ;;`(type sb-sys:system-area-pointer ,name)
                      #+nil
                      `(type (sb-alien:alien (sb-alien:array ,(alien-type-for (aref type 0)) 0)) ,name)
@@ -278,14 +331,15 @@
 
 (defun sap-get-ref-for (type)
   (cond
-    ((eq type 'vacietis.c:double)          'sb-kernel::sap-ref-double)
-    ((eq type 'vacietis.c:float)           'sb-kernel::sap-ref-single)
-    ((eq type 'vacietis.c:long)            'sb-kernel::signed-sap-ref-64)
-    ((eq type 'vacietis.c:int)             'sb-kernel::signed-sap-ref-32)
-    ((eq type 'vacietis.c:short)           'sb-kernel::signed-sap-ref-16)
-    ((eq type 'vacietis.c:char)            'sb-kernel::signed-sap-ref-8)
-    ((eq type 'vacietis.c:unsigned-long)   'sb-kernel::sap-ref-64)
-    ((eq type 'vacietis.c:unsigned-int)    'sb-kernel::sap-ref-32)
-    ((eq type 'vacietis.c:unsigned-short)  'sb-kernel::sap-ref-16)
-    ((eq type 'vacietis.c:unsigned-char)   'sb-kernel::sap-ref-8)
+    ((eq type 'vacietis.c:double)          'sb-sys:sap-ref-double)
+    ((eq type 'vacietis.c:float)           'sb-sys:sap-ref-single)
+    ((eq type 'vacietis.c:long)            'sb-sys:signed-sap-ref-64)
+    ((eq type 'vacietis.c:int)             'sb-sys:signed-sap-ref-32)
+    ((eq type 'vacietis.c:short)           'sb-sys:signed-sap-ref-16)
+    ((eq type 'vacietis.c:char)            'sb-sys:signed-sap-ref-8)
+    ((eq type 'vacietis.c:unsigned-long)   'sb-sys:sap-ref-64)
+    ((eq type 'vacietis.c:unsigned-int)    'sb-sys:sap-ref-32)
+    ((eq type 'vacietis.c:unsigned-short)  'sb-sys:sap-ref-16)
+    ((eq type 'vacietis.c:unsigned-char)   'sb-sys:sap-ref-8)
+    ((pointer-to-p type)                   'sap-ref-c-pointer)
     (t nil)))

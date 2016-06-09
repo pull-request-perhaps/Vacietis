@@ -397,6 +397,7 @@
       (gethash identifier (compiler-state-typedefs *compiler-state*))))
 
 (defvar *local-var-types* nil)
+(defvar *local-variables* nil)
 
 (defun size-of (x)
   (or (type-size x)
@@ -405,33 +406,36 @@
 
 (defun c-type-of (x)
   ;;(maphash #'(lambda (k v) (dbg "  func: ~S: ~S~%" k v)) (compiler-state-functions *compiler-state*))
+  ;;(when *local-var-types* (maphash #'(lambda (k v) (dbg "  ~S: ~S~%" k v)) *local-var-types*))
   (if (and (constantp x) (numberp x))
       (typecase x
         (double-float 'vacietis.c:double)
         (single-float 'vacietis.c:float)
         (t 'vacietis.c:int))
       (or (when *local-var-types*
-            ;;(dbg "c-type-of ~S~%" x)
-            ;;(maphash #'(lambda (k v) (dbg "  ~S: ~S~%" k v)) *local-var-types*)
             (gethash x *local-var-types*))
           (gethash x (compiler-state-var-types *compiler-state*))
           (when (gethash x (compiler-state-functions *compiler-state*))
             'function))))
 
-(defun array-type-of-exp (exp &optional base-type)
+(defun array-type-of-exp (exp)
   (let ((type
          (if (listp exp)
              (cond
                ((eq 'vacietis.c:alien[] (car exp))
                 (let ((type (array-type-of-exp (third exp))))
-                  (when type
-                    (when (array-type-p type)
-                      type))))
+                  (cond ((array-type-p type)
+                         type)
+                        ((pointer-to-p type)
+                         type)
+                        (t nil))))
                ((eq 'vacietis.c:[] (car exp))
-                (let ((type (array-type-of-exp (second exp))))
-                  (when type
-                    (when (array-type-p type)
-                      type))))
+                (let ((type (array-type-of-exp (third exp))))
+                  (cond ((array-type-p type)
+                         type)
+                        ((pointer-to-p type)
+                         type)
+                        (t nil))))
                (t
                 (c-type-of-exp exp)))
              (c-type-of exp))))
@@ -492,7 +496,7 @@
                 ;; XXX
                 'vacietis.c:int))
              (c-type-of exp))))
-    ;;(dbg "c-type-of-exp ~S: ~S~%" exp type)
+    (dbg "c-type-of-exp ~S: ~S~%" exp type)
     type))
 
 (defun struct-name-of-type (type)
@@ -670,6 +674,10 @@
                                             1
                                             0)
                                        `(vacietis.c:! ,rest)))
+                                  ((eq x 'vacietis.c:&)
+                                   (let ((type (c-type-of-exp rest)))
+                                     (dbg "rest type: ~S~%" type)
+                                     (list 'vacietis.c:mkptr& rest)))
                                   (t
                                    (list (case x
                                            (vacietis.c:- '-)
@@ -860,7 +868,7 @@
                   (read-error "No 'while' following a 'do'"))))
           (vacietis.c:for
             `(vacietis.c:for
-                 ,(let* ((*local-var-types*       (make-hash-table))
+                 ,(let* ((*local-var-types*       (make-hash-table)) ;; XXX don't we need the local-vars previously declared?
                          (*variable-declarations* ()) ;; c99, I think?
                          (*variable-lisp-type-declarations* ())
                          (initializations         (progn
@@ -878,7 +886,8 @@
   (let (arglist
         arglist-type-declarations
         (*function-name* name)
-        (*local-var-types* (make-hash-table)))
+        (*local-var-types* (make-hash-table))
+        (*local-variables* (make-hash-table)))
     (block done-arglist
       (loop for param across (c-read-delimited-list (next-char) #\,) do
            (block done-arg
@@ -895,11 +904,13 @@
                                         do (setq type (make-pointer-to :type type))
                                           (decf ptrlev))
                                      (setq arg-type type)))
-                                 (setf (gethash x *local-var-types*) arg-type)
                                  (setq arg-name x)
-                                 (push x arglist)
-                                 ;;(return-from done-arg)
-                                 )
+                                 (setf (gethash arg-name *local-var-types*) arg-type)
+                                 (setf (gethash arg-name *local-variables*)
+                                       (make-c-variable :name arg-name
+                                                        :parameter t
+                                                        :type arg-type))
+                                 (push arg-name arglist))
                                 ((vectorp x)
                                  (loop for x1 across x do
                                       (when (not (or (c-type? x1)
@@ -925,6 +936,7 @@
                         ((eq 'vacietis.c:* x)
                          (incf ptrlev))
                         ((and (listp x) (eq 'vacietis.c:[] (car x)))
+                         ;; dimensions are reversed here
                          (setf arg-type
                                (make-array-type
                                 :element-type arg-type
@@ -932,9 +944,28 @@
                                               (when (> (length it) 0)
                                                 (list (aref it 0))))))
                          (dbg "  -> arg-type: ~S~%" arg-type)
+                         (setf (gethash arg-name *local-variables*)
+                               (make-c-variable :name arg-name
+                                                :parameter t
+                                                :type arg-type))
                          (setf (gethash arg-name *local-var-types*) arg-type))
                         ((not (or (c-type? x) (eq 'vacietis.c:* x)))
                          (strip-type x))))
+                 ;; fix array dimensions
+                 (let* ((type arg-type)
+                        (dims))
+                   (loop
+                      while (array-type-p type)
+                      do (when (array-type-p type)
+                           (push (car (array-type-dimensions type)) dims)
+                           (setq type (array-type-element-type type))))
+                   (dbg "dims: ~S~%" dims)
+                   (setq type arg-type)
+                   (loop
+                      while (array-type-p type)
+                      do (when (array-type-p type)
+                           (setf (array-type-dimensions type) (list (pop dims)))
+                           (setq type (array-type-element-type type)))))
                  (push (lisp-type-declaration-for arg-type arg-name)
                        arglist-type-declarations))))))
     (if (eql (peek-char nil %in) #\;)
@@ -955,7 +986,7 @@
                (declare ,@(remove-if #'null arglist-type-declarations))
                ,(let* ((*variable-declarations* ())
                        (*variable-lisp-type-declarations* ())
-                       (body                    (read-c-block (next-char))))
+                       (body (read-c-block (next-char))))
                       `(prog* ,(reverse *variable-declarations*)
                           (declare ,@(remove-if #'null *variable-lisp-type-declarations*))
                           ,@body))))))))
@@ -1102,7 +1133,7 @@
 (defvar *alien-value-table* (make-hash-table :weakness :value))
 
 (defun convert-to-alien-value (type value)
-  (let* ((c-sap (gensym))
+  (let* ((c-pointer (gensym))
          (sap (gensym))
          (offset 0)
          (size (gensym))
@@ -1161,10 +1192,10 @@
                  (let* ((,size (sb-alien:alien-size ,alien-type :bytes))
                         (,element-size (sb-alien:alien-size ,alien-element-type :bytes))
                         (,offset 0)
-                        (,c-sap (array-backed-sap ,size)))
+                        (,c-pointer (array-backed-c-pointer ,size)))
                    (labels ((,convert-one ,@(cdr convert-one-form)))
-                     (with-array-backed-saps (,c-sap)
-                       (let ((,sap (c-sap-sap ,c-sap))
+                     (with-array-backed-c-pointers (,c-pointer)
+                       (let ((,sap (c-pointer-sap ,c-pointer))
                              (,all-elements
                               ,(if elements-are-constant
                                    `(gethash ,alien-value-ctr *alien-value-table*)
@@ -1179,15 +1210,15 @@
                                   ,all-elements)
                                  (setq ,all-elements (nthcdr ,n-elements ,all-elements))
                                  (incf ,offset ,element-size)))
-                         ,c-sap)))))))
+                         ,c-pointer)))))))
           `(locally
                (declare ,*optimize*)
              (let* ((,size (sb-alien:alien-size ,alien-type :bytes))
-                    (,c-sap (array-backed-sap ,size)))
-               (with-array-backed-saps (,c-sap)
-                 (let ((,sap (c-sap-sap ,c-sap)))
+                    (,c-pointer (array-backed-c-pointer ,size)))
+               (with-array-backed-c-pointers (,c-pointer)
+                 (let ((,sap (c-pointer-sap ,c-pointer)))
                ,(one-long-progn (set-alien-values type sap #'next-value #'next-offset))))
-               ,c-sap))))))
+               ,c-pointer))))))
 
 (defun to-struct-value (type value)
   (if *use-alien-types*
@@ -1402,8 +1433,6 @@
     (setf (aref decls 0) (concatenate 'vector spec-so-far (aref decls 0)))
     ;;(dbg "rvd: spec-so-far: ~S ~S~%" spec-so-far base-type)
     (loop for x across decls
-       do (dbg "processing variable declaration~%")
-       ;;do (dbg "processing variable declaration of ~S with base-type ~S~%" x base-type)
        do
          (multiple-value-bind (name type initial-value)
              (process-variable-declaration (parse-infix x 0 (length x) base-type) base-type)
@@ -1412,18 +1441,18 @@
            (setf (gethash name (or *local-var-types*
                                    (compiler-state-var-types *compiler-state*)))
                  type)
+           (setf (gethash name (or *local-variables*
+                                   (compiler-state-variables *compiler-state*)))
+                 (make-c-variable :name name
+                                  :type type))
            (if (boundp '*variable-declarations*)
                (progn (push `(,name ,@(if initial-value
                                           (list initial-value)
                                           (list (preallocated-value-exp-for type))))
                             *variable-declarations*)
-                      (push (lisp-type-declaration-for type name)
-                            *variable-lisp-type-declarations*)
                       (dbg "variable declaration: ~S ~S~%" type name)
-                      #+nil
-                      (when initial-value
-                        (push `(vacietis.c:= ,name ,initial-value)
-                              decl-code)))
+                      (push (lisp-type-declaration-for type name)
+                            *variable-lisp-type-declarations*))
                (unless *is-extern*
                  ;;(dbg "global ~S type: ~S initial-value: ~S~%" name type initial-value)
                  (let* ((defop 'defparameter)
@@ -1438,15 +1467,7 @@
                    (push `(locally (declare
                                     ,*optimize*)
                             (,defop ,varname
-                                ,varvalue
-                                #+nil
-                                ,(if (and (listp varvalue)
-                                          (eq 'vacietis::array-backed-alien-array (car varvalue)))
-                                     `(array-backed-alien-cast ,varvalue ,(alien-type-for type))
-                                     varvalue)))
-                         decl-code)
-                   #+nil
-                   (push declamation
+                                ,varvalue))
                          decl-code))))))
     (if decl-code
         (cons 'progn (nreverse decl-code))
@@ -1533,25 +1554,22 @@
          (read-error "Unexpected parser error: unknown type ~A" token))))
 
 (defun read-struct-decl-body (struct-type)
-  (let ((i 0)
+  (let ((slot-index 0)
         (*in-struct* t))
     (loop for c = (next-char) until (eql #\} c) do
          (multiple-value-bind (slot-name slot-type)
              (let ((base-type (read-base-type (read-c-exp c))))
                (process-variable-declaration (read-infix-exp (next-exp))
                                              base-type))
-           (dbg "struct-type: ~S slot-name ~A i: ~D~%" struct-type slot-name i)
+           (dbg "struct-type: ~S slot-name ~A i: ~D~%" struct-type slot-name slot-index)
            (setf (gethash (format nil "~A.~A" (slot-value struct-type 'name) slot-name)
                           (compiler-state-accessors *compiler-state*))
-                 (if *use-alien-types* slot-name i)
+                 (if *use-alien-types* slot-name slot-index)
                  (struct-type-slot-names struct-type)
                  (append (struct-type-slot-names struct-type) (list slot-name))
                  (struct-type-slots struct-type)
                  (append (struct-type-slots struct-type) (list slot-type)))
-           ;; use a vector
-           (incf i)
-           #+nil
-           (incf i (size-of slot-type))))))
+           (incf slot-index)))))
 
 (defun read-c-identifier-list (c)
   (map 'list (lambda (v)
@@ -1662,8 +1680,8 @@
                       (intern identifier-name)
                       ;;(intern (string-upcase identifier-name))
                       )))
-      (case symbol
-        ('t '__c_t)
+      (cond
+        ((eq 't symbol) 'c-t)
         (t symbol)))))
 
 (defun match-longest-op (one)

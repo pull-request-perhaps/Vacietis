@@ -46,12 +46,14 @@
 
 (defmacro eval-test (name input result)
   `(test ,name
-     (is (equalp ,(if (stringp result)
-                      `(string-to-char* ,result)
-                      result)
-                 (do-with-temp-c-package ',name
-                   (lambda ()
-                     (eval (vacietis::cstr ,input))))))))
+     (is (equalp ,result
+                 (let ((eval-result
+                        (do-with-temp-c-package ',name
+                          (lambda ()
+                            (eval (vacietis::cstr ,input))))))
+                   ,(if (stringp result)
+                        '(vacietis::char*-to-string eval-result)
+                        'eval-result))))))
 
 (defvar *test-dir*
   (asdf:system-relative-pathname :vacietis "test/"))

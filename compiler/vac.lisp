@@ -31,9 +31,10 @@
   `',(sb-cltl2:macroexpand-all form env))
 
 (defun dimension-size (n dimensions element-size)
+  (dbg "dimension-size: ~S ~S ~S~%" n dimensions element-size)
   (if (= n 0)
       element-size
-      (* (nth (- (length dimensions) n) dimensions)
+      (* (or (nth (- (length dimensions) n) dimensions) (error "bad dimensions"))
          (dimension-size (1- n) dimensions element-size))))
 
 (defun ensure-array-type (type)
@@ -44,38 +45,111 @@
      type)
     (t (error "not an array-type: ~S~%" type))))
 
-(defun parse-array-accessor (expr offsets &optional indexen)
+(defparameter *pointer-size* 24)
+(defparameter *use-pointer-offset* t)
+
+(defun alien-array-accessor-deref (type expr)
+  (let* ((getter (sap-get-ref-for type)))
+    (dbg "  -> deref getter: ~S~%" getter)
+    (if (listp expr)
+        (destructuring-bind (op array-type array-var index-var)
+            expr
+          (declare (ignore op array-type))
+          (if (and (listp array-var) (eq (first array-var) 'vacietis.c:alien[]))
+              (multiple-value-bind (next-var final-var final-type)
+                  (alien-array-accessor-deref (pointer-to-type type) array-var)
+                (values `(,getter (c-pointer-sap ,next-var)
+                                  ,(list* '+
+                                          (append
+                                           (if *use-pointer-offset*
+                                               (list `(c-pointer-offset ,array-var)))
+                                           (list `(* ,*pointer-size* ,index-var)))))
+                        final-var
+                        final-type))
+              (values `(,getter (c-pointer-sap ,array-var)
+                                ,(list* '+
+                                        (append
+                                         (if *use-pointer-offset*
+                                             (list `(c-pointer-offset ,array-var)))
+                                         (list `(* ,*pointer-size* ,index-var)))))
+                      array-var
+                      (pointer-to-type type))))
+        (values expr expr type))))
+
+
+(defun parse-array-accessor (expr offsets &optional type indexen)
+  (dbg "parse-array-accessor ~S ~S~%" expr type)
   (destructuring-bind (op array-type array-var index-var)
       expr
     (declare (ignore op))
-    (if (and (listp array-var) (eq (first array-var) 'vacietis.c:alien[]))
-        (parse-array-accessor array-var offsets (append indexen (list index-var)))
-        (let* ((array-type (ensure-array-type array-type))
-               (element-type (lisp-array-element-type array-type))
-               (alien-element-type (alien-type-for element-type))
-               (element-size (eval `(sb-alien:alien-size ,alien-element-type :bytes)))
-               (dimensions (lisp-array-dimensions array-type))
-               (indices (append indexen (list index-var))))
-          (dbg "  -> element-type: ~S~%" element-type)
-          (parse-alien-accessor
+    (unless type
+      (setq type array-type))
+    (if (and (listp array-var)
+             (not (pointer-to-p type))
+             (eq (first array-var) 'vacietis.c:alien[]))
+        (progn
+          (parse-array-accessor
            array-var
-           (append offsets
-                   (list (list* '+ (mapcar (lambda (size)
-                                             `(* ,size ,(pop indices)))
-                                           (loop for n from 0 upto (1- (length dimensions))
-                                                collect (dimension-size n dimensions element-size)))))))))))
-
-(defun parse-alien-accessor (expr &optional offsets)
-  (dbg "parse-alien-accessor: ~S~%" expr)
-  (if (atom expr)
-      (values expr offsets)
-      (cond
-        ((eq 'vacietis.c:alien[] (car expr))
-         (parse-array-accessor expr offsets))
-        ((eq 'vacietis.c:|.| (car expr))
-         (parse-struct-accessor expr offsets))
-        (t
-         (values expr offsets)))))
+           offsets
+           (cond ((pointer-to-p type) (pointer-to-type type))
+                 ((array-type-p type) (array-type-element-type type)))
+           (append indexen (list index-var))))
+        (if (pointer-to-p type)
+            (let* ((dimensions
+                    (or (make-list (length indexen) :initial-element nil)
+                        (list nil))
+                     #+nil
+                     (lisp-array-dimensions array-type))
+                   (element-type (lisp-array-element-type array-type))
+                   (alien-element-type (alien-type-for element-type))
+                   (element-size (eval `(sb-alien:alien-size ,alien-element-type :bytes)))
+                   (indices (or indexen
+                                (list index-var))))
+              (dbg "  -> *element-type: ~S~%" element-type)
+              (dbg "  -> *dimensions: ~S~%" dimensions)
+              (dbg "  -> *indices: ~S~%" indices)
+              (dbg "  -> *offsets: ~S~%" offsets)
+              (multiple-value-bind (accessor final-var final-type)
+                  (if (null indexen)
+                      (alien-array-accessor-deref (pointer-to-type type) array-var)
+                      (alien-array-accessor-deref type expr))
+                (values accessor
+                        (if indices
+                            (append offsets
+                                    (list (list* '+ (mapcar (lambda (size)
+                                                              `(* ,size ,(pop indices)))
+                                                            (loop for n from 0 upto (1- (length dimensions))
+                                                               collect (dimension-size n dimensions element-size))))))
+                            offsets)
+                        final-var
+                        final-type)))
+            (let* ((full-dimensions (lisp-array-full-dimensions array-type))
+                   (dimensions (lisp-array-dimensions array-type))
+                   (indices (append indexen (list index-var)))
+                   (element-type
+                    (if (= (length indices) (length full-dimensions))
+                        (lisp-array-element-type array-type)
+                        (array-type-element-type array-type)))
+                   (alien-element-type (alien-type-for element-type))
+                   (element-size (if (pointer-to-p element-type)
+                                     *pointer-size*
+                                     (eval `(sb-alien:alien-size ,alien-element-type :bytes)))))
+              (dbg "  -> element-type: ~S~%" element-type)
+              (dbg "  -> dimensions: ~S~%" dimensions)
+              (dbg "  -> indices: ~S~%" indices)
+              (multiple-value-bind (array-var other-offsets)
+                  (parse-alien-accessor
+                   array-var
+                   (append offsets
+                           (list (list* '+ (mapcar (lambda (size)
+                                                     `(* ,size ,(pop indices)))
+                                                   (loop for n from 0 upto (1- (length dimensions))
+                                                      collect (dimension-size n dimensions element-size)))))))
+                (values
+                 array-var
+                 other-offsets
+                 nil
+                 element-type)))))))
 
 (defun parse-struct-accessor (expr offsets)
   (destructuring-bind (op struct-var (type slot-name))
@@ -91,8 +165,20 @@
        (append offsets
                (list offset))))))
 
+(defun parse-alien-accessor (expr &optional offsets)
+  (dbg "parse-alien-accessor: ~S~%" expr)
+  (if (atom expr)
+      (values expr offsets)
+      (cond
+        ((eq 'vacietis.c:alien[] (car expr))
+         (parse-array-accessor expr offsets))
+        ((eq 'vacietis.c:|.| (car expr))
+         (parse-struct-accessor expr offsets))
+        (t
+         (values expr offsets)))))
+
 (defmacro alien-slot-accessor (struct (type slot-name) &environment env)
-  (dbg "alien slot accessor: ~S ~S ~S~%" struct type slot-name)
+  (dbg "alien-slot-accessor: ~S ~S ~S~%" struct type slot-name)
   (let* ((alien-type (or (struct-type-alien-type type)
                          (setf (struct-type-alien-type type)
                                (eval `(sb-alien-internals:parse-alien-type ',(alien-type-for type) ,env)))))
@@ -104,17 +190,35 @@
     (multiple-value-bind (struct other-offsets)
         (parse-alien-accessor struct)
       (dbg "other-offsets: ~S~%" other-offsets)
-      `(the ,(lisp-type-for slot-type) (,getter (c-sap-sap ,struct) ,(list* '+ offset other-offsets))))))
+      `(the ,(lisp-type-for slot-type)
+            (,getter (c-pointer-sap ,struct)
+                     ,(list* '+
+                             (append
+                              (if *use-pointer-offset*
+                                  (list `(c-pointer-offset ,struct)))
+                              (list offset)
+                              other-offsets)))))))
 
-(defun make-alien-aref (array-type expr)
-  (dbg "make-alien-aref: ~S~%" expr)
-  (multiple-value-bind (array-var other-offsets)
+(defun alien-array-accessor (array-type expr)
+  (dbg "alien-array-accessor: ~S~%" expr)
+  (multiple-value-bind (array-var other-offsets final-var final-type)
       (parse-alien-accessor expr)
-    (dbg "aref other-offsets: ~S~%" other-offsets)
+    (dbg "  -> other-offsets: ~S~%" other-offsets)
     (let* ((array-type (ensure-array-type array-type))
-           (element-type (lisp-array-element-type array-type))
-           (getter (sap-get-ref-for element-type)))
-      `(the ,(lisp-type-for element-type) (,getter (c-sap-sap ,array-var) ,(list* '+ other-offsets))))))
+           ;;(element-type (lisp-array-element-type array-type))
+           (getter (sap-get-ref-for final-type)))
+      (dbg "  -> getter: ~S~%" getter)
+      (unless getter
+        (error (format nil "no getter for element-type ~S~%" final-type)))
+      (unless final-var
+        (setq final-var array-var))
+      `(the ,(lisp-type-for final-type)
+            (,getter (c-pointer-sap ,array-var)
+                     ,(list* '+
+                             (append
+                              (if *use-pointer-offset*
+                                  (list `(c-pointer-offset ,array-var)))
+                              other-offsets)))))))
 
 
 (defun make-aref (array-var index-var &optional indexen)
@@ -177,7 +281,7 @@
               (vacietis.c:[] (array-var index-var)
                 (make-aref array-var index-var))
               (vacietis.c:alien[] (array-type array-var index-var)
-                (make-alien-aref array-type (list 'vacietis.c:alien[] array-type array-var index-var)))
+                (alien-array-accessor array-type (list 'vacietis.c:alien[] array-type array-var index-var)))
               (vacietis.c:|.|
                 (struct-var slot-name-or-index)
                 (if *use-alien-types*
