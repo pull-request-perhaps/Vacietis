@@ -227,6 +227,117 @@
       (make-aref (second array-var) (third array-var) (append indexen (list index-var)))
       (list* 'aref array-var (nreverse (append indexen (list index-var))))))
 
+(defun make-deref* (type expr)
+  (dbg "make-deref*: ~S ~S~%" type expr)
+  (let* ((next-type (pointer-to-type type))
+         (getter (sap-get-ref-for next-type))
+         (ptr (gensym)))
+    (cond
+      ((and (listp expr)
+            (eq 'prog1 (car expr))
+            (let ((prg (car (cddr expr))))
+              (when (listp prg)
+                (eq 'vacietis.c::alien-ptr++ (car prg)))))
+       (let ((prg (car (cddr expr))))
+         `(let ((,ptr ,(cadr prg)))
+            (prog1
+                (the ,(lisp-type-for next-type)
+                     (,getter (c-pointer-sap ,ptr)
+                              ,(if *use-pointer-offset*
+                                   `(c-pointer-offset ,ptr)
+                                   0)))
+              ,prg))))
+      (t
+       `(let ((,ptr ,expr))
+          (the ,(lisp-type-for next-type)
+               (,getter (c-pointer-sap ,ptr)
+                        ,(if *use-pointer-offset*
+                             `(c-pointer-offset ,ptr)
+                             0))))))))
+
+(defun make-deref*-setf (lvalue rvalue)
+  (dbg "make-deref*-setf: ~S ~S~%" lvalue rvalue)
+  (destructuring-bind (deref* type expr)
+      lvalue
+    (declare (ignore deref*))
+    (let* ((next-type (pointer-to-type type))
+           (getter (sap-get-ref-for next-type))
+           (ptr (gensym))
+           (new-value (gensym)))
+      (cond
+        ((and (listp expr)
+              (eq 'prog1 (car expr))
+              (let ((prg (car (cddr expr))))
+                (when (listp prg)
+                  (eq 'vacietis.c::alien-ptr++ (car prg)))))
+         (let ((prg (car (cddr expr))))
+           `(let* ((,new-value ,rvalue)
+                   (,ptr ,(cadr prg)))
+              (prog1
+                  (setf (,getter (c-pointer-sap ,ptr)
+                                 ,(if *use-pointer-offset*
+                                      `(c-pointer-offset ,ptr)
+                                      0))
+                        ,new-value)
+                ,prg))))
+        (t
+         `(let* ((,new-value ,rvalue)
+                 (,ptr ,expr))
+            (setf (,getter (c-pointer-sap ,ptr)
+                           ,(if *use-pointer-offset*
+                                `(c-pointer-offset ,ptr)
+                                0))
+                  ,new-value)))))))
+
+(defun make-ptr+ (lvalue rvalue l-c-type r-c-type)
+  (cond
+    ((pointer-to-p l-c-type)
+     (let* ((next-type (pointer-to-type l-c-type))
+            (alien-type (alien-type-for next-type))
+            (size (eval `(sb-alien:alien-size ,alien-type :bytes)))
+            (ptr (gensym)))
+       `(let ((,ptr ,lvalue))
+          (make-c-pointer :sap (c-pointer-sap ,ptr)
+                          :offset (+ (c-pointer-offset ,ptr)
+                                     (* ,size ,rvalue))
+                          :id (c-pointer-id ,ptr)))))))
+
+(defun make-ptr+= (lvalue rvalue l-c-type r-c-type)
+  (cond
+    ((pointer-to-p l-c-type)
+     (let* ((next-type (pointer-to-type l-c-type))
+            (alien-type (alien-type-for next-type))
+            (size (eval `(sb-alien:alien-size ,alien-type :bytes))))
+       `(incf (c-pointer-offset ,lvalue)
+              (* ,size ,rvalue))))))
+
+(defun make-ptr++ (lvalue l-c-type)
+  (cond
+    ((pointer-to-p l-c-type)
+     (let* ((next-type (pointer-to-type l-c-type))
+            (alien-type (alien-type-for next-type))
+            (size (eval `(sb-alien:alien-size ,alien-type :bytes))))
+       `(incf (c-pointer-offset ,lvalue)
+              ,size)))))
+
+(defun make-ptr-= (lvalue rvalue l-c-type r-c-type)
+  (cond
+    ((pointer-to-p l-c-type)
+     (let* ((next-type (pointer-to-type l-c-type))
+            (alien-type (alien-type-for next-type))
+            (size (eval `(sb-alien:alien-size ,alien-type :bytes))))
+       `(decf (c-pointer-offset ,lvalue)
+              (* ,size ,rvalue))))))
+
+(defun make-ptr-- (lvalue l-c-type)
+  (cond
+    ((pointer-to-p l-c-type)
+     (let* ((next-type (pointer-to-type l-c-type))
+            (alien-type (alien-type-for next-type))
+            (size (eval `(sb-alien:alien-size ,alien-type :bytes))))
+       `(decf (c-pointer-offset ,lvalue)
+              ,size)))))
+
 (defmacro vac-override (&body body)
   `(macrolet ((vacietis.c:truncl (x)
                 `(sb-c::sbcl%fast-truncl ,x))
@@ -278,6 +389,34 @@
                 `(* ,@rest))
               (vacietis.c:/ (&rest rest)
                 `(/ ,@rest))
+              (vacietis.c::alien-ptr+ (lvalue rvalue l-c-type r-c-type)
+                (dbg ".c:alien-ptr+: ~S ~S ~S ~S~%" lvalue rvalue l-c-type r-c-type)
+                (make-ptr+ lvalue rvalue l-c-type r-c-type))
+              (vacietis.c::alien-ptr+= (lvalue rvalue l-c-type r-c-type)
+                (dbg ".c:alien-ptr+=: ~S ~S ~S ~S~%" lvalue rvalue l-c-type r-c-type)
+                (make-ptr+= lvalue rvalue l-c-type r-c-type))
+              (vacietis.c::alien-ptr-= (lvalue rvalue l-c-type r-c-type)
+                (dbg ".c:alien-ptr-=: ~S ~S ~S ~S~%" lvalue rvalue l-c-type r-c-type)
+                (make-ptr-= lvalue rvalue l-c-type r-c-type))
+              (vacietis.c::alien-ptr++ (lvalue l-c-type)
+                (dbg ".c:alien-ptr++: ~S ~S~%" lvalue l-c-type)
+                (make-ptr++ lvalue l-c-type))
+              (vacietis.c::alien-ptr-- (lvalue l-c-type)
+                (dbg ".c:alien-ptr--: ~S ~S~%" lvalue l-c-type)
+                (make-ptr-- lvalue l-c-type))
+              (vacietis.c:= (lvalue rvalue)
+                (dbg ".c:=: ~S ~S~%" lvalue rvalue)
+                (cond
+                  ((and *use-alien-types*
+                        (listp lvalue)
+                        (eq (car lvalue) 'vacietis.c:deref*))
+                   (make-deref*-setf lvalue rvalue))
+                  (t
+                   `(setf ,lvalue ,rvalue))))
+              (vacietis.c:deref* (&rest rest)
+                (if *use-alien-types*
+                    (make-deref* (car rest) (cadr rest))
+                    `(vacietis.c::orig-deref* ,@rest)))
               (vacietis.c:[] (array-var index-var)
                 (make-aref array-var index-var))
               (vacietis.c:alien[] (array-type array-var index-var)

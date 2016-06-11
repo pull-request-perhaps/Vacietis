@@ -504,6 +504,11 @@
     (place-ptr (setf (place-ptr-closure ptr) new-value))
     (simple-array (setf (aref ptr 0) new-value))))
 
+(defun vacietis.c::orig-deref* (ptr)
+  (vacietis.c:deref* ptr))
+(defun (setf vacietis.c::orig-deref*) (new-value ptr)
+  (funcall #'(setf vacietis.c:deref*) new-value ptr))
+
 (defmacro vacietis.c:[] (a i)
   (make-aref a i)
   #+nil
@@ -594,6 +599,7 @@
 ;;; assignment
 
 (defmacro vacietis.c:= (lvalue rvalue)
+  (dbg "vacietis.c:=: ~S ~S~%" lvalue rvalue)
   `(setf ,lvalue ,rvalue))
 
 (defmacro unroll-assignment-ops (&rest ops)

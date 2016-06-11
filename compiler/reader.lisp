@@ -463,7 +463,9 @@
                ((eq 'vacietis.c:deref* (car exp))
                 (if base-type
                     (make-pointer-to :type base-type)
-                    (let ((type (c-type-of-exp (cadr exp))))
+                    (let ((type (if *use-alien-types*
+                                    (cadr exp)
+                                    (c-type-of-exp (cadr exp)))))
                       (when (pointer-to-p type)
                         (pointer-to-type type)))))
                ((eq 'vacietis.c:% (car exp))
@@ -543,45 +545,70 @@
                                          (c-type-of-exp lvalue base-type)))
                            (r-c-type (c-type-of-exp rvalue))
                            (op (or op (aref exp i))))
-                       ;;(dbg "  -> type of lvalue ~S is: ~S~%" lvalue l-c-type)
-                       ;;(dbg "  -> type of rvalue ~S is: ~S~%" rvalue r-c-type)
+                       (dbg "  -> type of lvalue ~S is: ~S~%" lvalue l-c-type)
+                       (dbg "  -> type of rvalue ~S is: ~S~%" rvalue r-c-type)
                        (when (member op '(vacietis.c:|\|\|| vacietis.c:&&))
                          (when (integer-type? (c-type-of-exp lvalue))
                            (setq lvalue `(not (eql 0 ,lvalue))))
                          (when (integer-type? (c-type-of-exp rvalue))
                            (setq rvalue `(not (eql 0 ,rvalue)))))
-                       (list (let ()
-                               (cond
-                                 ((and (or (pointer-to-p l-c-type)
-                                           (array-type-p l-c-type))
-                                       (or (not (listp lvalue))
-                                           (not (eq 'vacietis.c:deref* (car lvalue)))))
-                                  (case op
-                                    (vacietis.c:+ 'vacietis.c:ptr+)
-                                    (vacietis.c:+= 'vacietis.c:ptr+=)
-                                    (vacietis.c:- 'vacietis.c:ptr-)
-                                    (vacietis.c:-= 'vacietis.c:ptr-=)
-                                    (vacietis.c:< 'vacietis.c:ptr<)
-                                    (vacietis.c:<= 'vacietis.c:ptr<=)
-                                    (vacietis.c:> 'vacietis.c:ptr>)
-                                    (vacietis.c:>= 'vacietis.c:ptr>=)
-                                    (vacietis.c:== 'vacietis.c:ptr==)
-                                    (vacietis.c:!= 'vacietis.c:ptr!=)
-                                    (t op)))
-                                 ((pointer-to-p r-c-type)
-                                  (case op
-                                    (vacietis.c:+ 'vacietis.c:ptr+)
-                                    (t op)))
-                                 ((integer-type? l-c-type)
-                                  (case op
-                                    (vacietis.c:/ 'vacietis.c:integer/)
-                                    (vacietis.c:/= 'vacietis.c:integer/=)
-                                    (t op)))
-                                 (t op)))
-                             lvalue
-                             (if (and (constantp rvalue) (numberp rvalue))
-                                 (lisp-constant-value-for l-c-type rvalue)
-                                 rvalue))))))
+                       (cond
+                         ((and *use-alien-types*
+                               (or (pointer-to-p l-c-type)
+                                   (array-type-p l-c-type))
+                               (or (not (listp lvalue))
+                                   (not (eq 'vacietis.c:deref* (car lvalue)))))
+                          (list
+                           (case op
+                             (vacietis.c:+ 'vacietis.c::alien-ptr+)
+                             (vacietis.c:+= 'vacietis.c:ptr+=)
+                             (vacietis.c:- 'vacietis.c:ptr-)
+                             (vacietis.c:-= 'vacietis.c:ptr-=)
+                             (vacietis.c:< 'vacietis.c:ptr<)
+                             (vacietis.c:<= 'vacietis.c:ptr<=)
+                             (vacietis.c:> 'vacietis.c:ptr>)
+                             (vacietis.c:>= 'vacietis.c:ptr>=)
+                             (vacietis.c:== 'vacietis.c:ptr==)
+                             (vacietis.c:!= 'vacietis.c:ptr!=)
+                             (t op))
+                           lvalue
+                           (if (and (constantp rvalue) (numberp rvalue))
+                               (lisp-constant-value-for l-c-type rvalue)
+                               rvalue)
+                           l-c-type
+                           r-c-type))
+                         (t
+                          (list (cond
+                                  ((and (or (pointer-to-p l-c-type)
+                                            (array-type-p l-c-type))
+                                        (or (not (listp lvalue))
+                                            (not (eq 'vacietis.c:deref* (car lvalue)))))
+                                   (case op
+                                     (vacietis.c:+ 'vacietis.c:ptr+)
+                                     (vacietis.c:+= 'vacietis.c:ptr+=)
+                                     (vacietis.c:- 'vacietis.c:ptr-)
+                                     (vacietis.c:-= 'vacietis.c:ptr-=)
+                                     (vacietis.c:< 'vacietis.c:ptr<)
+                                     (vacietis.c:<= 'vacietis.c:ptr<=)
+                                     (vacietis.c:> 'vacietis.c:ptr>)
+                                     (vacietis.c:>= 'vacietis.c:ptr>=)
+                                     (vacietis.c:== 'vacietis.c:ptr==)
+                                     (vacietis.c:!= 'vacietis.c:ptr!=)
+                                     (t op)))
+                                  ((pointer-to-p r-c-type)
+                                   (case op
+                                     (vacietis.c:+ 'vacietis.c:ptr+)
+                                     (t op)))
+                                  ((integer-type? l-c-type)
+                                   (case op
+                                     (vacietis.c:/ 'vacietis.c:integer/)
+                                     (vacietis.c:/= 'vacietis.c:integer/=)
+                                     (t op)))
+                                  (t op))
+                                lvalue
+                                (if (and (constantp rvalue) (numberp rvalue))
+                                    (lisp-constant-value-for l-c-type rvalue)
+                                    rvalue))))))))
           ;; in order of weakest to strongest precedence
           ;; comma
           (awhen (match-binary-ops '(vacietis.c:|,|))
@@ -641,19 +668,34 @@
                                                (parse-infix exp (1+ i) end)))
                                  (place-type (c-type-of-exp place))
                                  ;;(__ (dbg "place-type of ~S: ~S~%" place place-type))
-                                 (set-exp `(vacietis.c:=
-                                            ,place
-                                            (,(if (eq x 'vacietis.c:++)
-                                                  ;; XXX need to do the same for --
-                                                  (cond
-                                                    ((pointer-to-p place-type)
-                                                     'vacietis.c:ptr+)
-                                                    (t 'vacietis.c:+))
-                                                  (cond
-                                                    ((pointer-to-p place-type)
-                                                     'vacietis.c:ptr-)
-                                                    (t 'vacietis.c:-)))
-                                              ,place 1))))
+                                 (set-exp
+                                  (cond
+                                    ((and *use-alien-types*
+                                          (pointer-to-p place-type)
+                                          (eq x 'vacietis.c:++))
+                                     `(vacietis.c::alien-ptr++ ,place ,place-type))
+                                    ((and *use-alien-types*
+                                          (pointer-to-p place-type)
+                                          (eq x 'vacietis.c:--))
+                                     `(vacietis.c::alien-ptr-- ,place ,place-type))
+                                    (t
+                                     `(vacietis.c:=
+                                       ,place
+                                       (,(if (eq x 'vacietis.c:++)
+                                             (cond
+                                               ((pointer-to-p place-type)
+                                                'vacietis.c:ptr+)
+                                               (t 'vacietis.c:+))
+                                             (cond
+                                               ((pointer-to-p place-type)
+                                                'vacietis.c:ptr-)
+                                               (t 'vacietis.c:-)))
+                                         ,place
+                                         1
+                                         ,@(cond
+                                            ((and *use-alien-types*
+                                                  (pointer-to-p place-type))
+                                             (list place-type (c-type-of-exp 1))))))))))
                             (if postfix?
                                 `(prog1 ,place ,set-exp)
                                 set-exp))))
@@ -679,12 +721,16 @@
                                      (dbg "rest type: ~S~%" type)
                                      (list 'vacietis.c:mkptr& rest)))
                                   (t
-                                   (list (case x
-                                           (vacietis.c:- '-)
-                                           (vacietis.c:* 'vacietis.c:deref*)
-                                           (vacietis.c:& 'vacietis.c:mkptr&)
-                                           (otherwise     x))
-                                         rest))))))))))
+                                   (list* (case x
+                                            (vacietis.c:- '-)
+                                            (vacietis.c:* 'vacietis.c:deref*)
+                                            (vacietis.c:& 'vacietis.c:mkptr&)
+                                            (otherwise     x))
+                                          (append
+                                           (when (and *use-alien-types*
+                                                      (eq x 'vacietis.c:*))
+                                             (list (c-type-of-exp rest)))
+                                           (list rest))))))))))))
           ;; funcall, aref, and struct access
           (loop for i from (1- end) downto (1+ start) for x = (aref exp i) do
                (cond
@@ -885,6 +931,8 @@
 (defun read-function (name result-type)
   (let (arglist
         arglist-type-declarations
+        local-arglist-declarations
+        local-arglist-lisp-type-declarations
         (*function-name* name)
         (*local-var-types* (make-hash-table))
         (*local-variables* (make-hash-table)))
@@ -910,6 +958,19 @@
                                        (make-c-variable :name arg-name
                                                         :parameter t
                                                         :type arg-type))
+                                 (when *use-alien-types*
+                                   (cond
+                                     ((pointer-to-p arg-type)
+                                      (let ((passed-arg-name (intern (format nil "ARG-~A" (symbol-name arg-name))
+                                                                     #+nil
+                                                                     (symbol-package arg-name))))
+                                        (push `(,arg-name (vacietis::copy-c-pointer ,passed-arg-name))
+                                              local-arglist-declarations)
+                                        (push `(dynamic-extent ,arg-name)
+                                              local-arglist-lisp-type-declarations)
+                                        (push `(type vacietis::c-pointer ,arg-name)
+                                              local-arglist-lisp-type-declarations)
+                                        (setq arg-name passed-arg-name)))))
                                  (push arg-name arglist))
                                 ((vectorp x)
                                  (loop for x1 across x do
@@ -973,6 +1034,7 @@
         (let ((ftype `(ftype (function ,(make-list (length arglist) :initial-element '*) ,(lisp-type-for result-type)) ,name)))
           (when (find '&rest arglist)
             (setq ftype nil))
+          (setq arglist (nreverse arglist))
           (dbg "result type of ~S: ~S~%" name result-type)
           (dbg "ftype: ~S~%" ftype)
           (verbose "function ~S~%" ftype)
@@ -982,13 +1044,17 @@
           `(progn
              ,@(when *is-inline* (list `(declaim (inline ,name))))
              ,@(when ftype (list `(declaim ,ftype)))
-             (vac-defun/1 ,name ,(reverse arglist)
+             (vac-defun/1 ,name ,arglist
                (declare ,@(remove-if #'null arglist-type-declarations))
                ,(let* ((*variable-declarations* ())
                        (*variable-lisp-type-declarations* ())
                        (body (read-c-block (next-char))))
-                      `(prog* ,(reverse *variable-declarations*)
-                          (declare ,@(remove-if #'null *variable-lisp-type-declarations*))
+                      `(prog* ,(append
+                                local-arglist-declarations
+                                (nreverse *variable-declarations*))
+                          (declare
+                           ,@(remove-if #'null local-arglist-lisp-type-declarations)
+                           ,@(remove-if #'null *variable-lisp-type-declarations*))
                           ,@body))))))))
 
 (defun one-long-progn (body)
@@ -1420,9 +1486,12 @@
                                     (and (listp initial-value)
                                          (eq (car initial-value) 'vacietis.c:mkptr&)))
                           (setq initial-value `(vacietis.c:mkptr& (aref ,initial-value 0))))
+                        ;; skip type
+                        (when *use-alien-types*
+                          (setq name val/size))
                         (parse-declaration name))
                        (t (read-error "Unknown thing in declaration ~A" x)))))))
-      ;;(dbg "spec: ~S~%" spec)
+      (dbg "spec: ~S~%" spec)
       (parse-declaration spec)
       (values name type initial-value))))
 
