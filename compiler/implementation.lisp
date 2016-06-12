@@ -85,6 +85,28 @@
     (sb-kernel:%set-sap-ref-word sap (+ offset sb-vm:n-word-bytes) w-offset)
     (sb-kernel:%set-sap-ref-word sap (+ offset (* 2 sb-vm:n-word-bytes)) w-id)))
 
+(defmacro define-c-pointer-ref-functions (options &rest types)
+  (declare (ignore options))
+  (let (forms)
+    (dolist (type types)
+      (let ((fname (intern (format nil "C-POINTER-REF-~A" (symbol-name type)))))
+        (push
+         `(declaim (inline ,fname))
+         forms)
+        (push
+         `(defun ,fname (ptr offset)
+            (declare (optimize (speed 3) (debug 0) (safety 0))
+                     (type c-pointer ptr)
+                     (type fixnum offset))
+            (,(sap-get-ref-for type) (c-pointer-sap ptr) (+ (c-pointer-offset ptr) offset)))
+         forms)))
+    `(progn ,@forms)))
+
+(define-c-pointer-ref-functions ()
+    vacietis.c:double vacietis.c:float
+    vacietis.c:long vacietis.c:int vacietis.c:short vacietis.c:char
+    vacietis.c:unsigned-long vacietis.c:unsigned-int vacietis.c:unsigned-short vacietis.c:unsigned-char)
+
 (defvar *c-pointers* (make-hash-table :weakness :key))
 (defvar *interned-c-pointers* (make-hash-table :weakness :value))
 
@@ -370,10 +392,36 @@
       ((and *use-alien-types*
             (listp place)
             (member (car place) '(aref vacietis.c:alien[])))
-       (multiple-value-bind (parsed offsets)
+       (multiple-value-bind (parsed-place offsets)
            (parse-alien-accessor place)
-         (dbg "  -> PARSED: ~S  ~S~%" parsed offsets)
-         (error "XXX not implemented")))
+         (dbg "  -> PARSED: ~S  ~S~%" parsed-place offsets)
+         (let ((value (gensym))
+               (ptr (gensym)))
+           `(let* ((,value ,parsed-place)
+                   (,ptr (make-c-pointer :sap (c-pointer-sap ,value)
+                                         :offset (+ (c-pointer-offset ,value) ,@offsets)
+                                         :id (c-pointer-id ,value))))
+              ,ptr))))
+      ((and *use-alien-types*
+            ;; XXX
+            (or
+             (eq 'vacietis.c:|...| place)
+             (symbolp place)))
+       (let ((varsym (gensym)))
+         `(progn
+            (let ((,varsym ,place))
+              (dbg "%closure making place ptr to ~S(~S)~%" ',place ,varsym)
+              (make-place-ptr
+               :offset nil
+               :variable nil
+               :%closure (lambda (&optional ,new-value)
+                           (if ,new-value
+                               (setf ,place ,new-value)
+                               ,place)))))))
+      ((and *use-alien-types*
+            t)
+       (let ((pointer-sym (cadr (cadr place))))
+         `(copy-c-pointer ,pointer-sym)))
       ((and (listp place)
             (member (car place) '(aref vacietis.c:[])))
        (let* ((variable (second place))

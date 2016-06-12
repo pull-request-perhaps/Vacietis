@@ -343,3 +343,6 @@
     ((eq type 'vacietis.c:unsigned-char)   'sb-sys:sap-ref-8)
     ((pointer-to-p type)                   'sap-ref-c-pointer)
     (t nil)))
+
+(defun primitive-type? (type)
+  (sap-get-ref-for type))

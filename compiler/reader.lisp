@@ -489,10 +489,30 @@
                ((member (car exp) (mapcar #'(lambda (x) (intern (string-upcase x) :vacietis.c))
                                           '(&& |\|\|| < <= > >= == != ptr< ptr<= ptr> ptr>= ptr== ptr!=)))
                 nil)
+               ((member (car exp) '(vacietis.c::alien-ptr+ vacietis.c::alien-ptr-))
+                (let ((l-c-type (c-type-of-exp (second exp)))
+                      (r-c-type (c-type-of-exp (third exp))))
+                  (cond
+                    ((pointer-to-p l-c-type)
+                     l-c-type)
+                    ((pointer-to-p r-c-type)
+                     r-c-type)
+                    (t
+                     nil))))
+               ((member (car exp) '(vacietis.c::alien-ptr++ vacietis.c::alien-ptr--
+                                    vacietis.c::alien-ptr+= vacietis.c::alien-ptr-=))
+                (c-type-of-exp (second exp)))
+               ((member (car exp) '(vacietis.c::alien-ptr< vacietis.c::alien-ptr<=
+                                    vacietis.c::alien-ptr> vacietis.c::alien-ptr>=
+                                    vacietis.c::alien-ptr== vacietis.c::alien-ptr!=))
+                nil)
                ((member (car exp) '(cl:- cl:+ cl:* cl:/))
                 (c-type-of-exp (cadr exp)))
                ((gethash (car exp) (compiler-state-functions *compiler-state*))
                 (c-function-return-type (gethash (car exp) (compiler-state-functions *compiler-state*))))
+               ((and (symbolp (car exp))
+                     (equal "__VA_ARG" (symbol-name (car exp))))
+                (make-pointer-to :type 'vacietis.c:void))
                (t
                 ;; function
                 ;; XXX
@@ -536,7 +556,7 @@
                                     exp :start (1+ start) :end (1- end)
                                     :from-end lassoc))))
                  (parse-binary (i &optional op)
-                   ;;(dbg "binary-op pre parse ~S ~S-~S-~S~%" (or op (aref exp i)) start i end)
+                   (dbg "binary-op pre parse ~S ~S-~S-~S~%" (or op (aref exp i)) start i end)
                    (let* ((lvalue (parse-infix exp start i))
                           (rvalue (parse-infix exp (1+ i) end)))
                      ;;(dbg "binary-op ~S ~S ~S~%" (or op (aref exp i)) lvalue rvalue)
@@ -561,15 +581,15 @@
                           (list
                            (case op
                              (vacietis.c:+ 'vacietis.c::alien-ptr+)
-                             (vacietis.c:+= 'vacietis.c:ptr+=)
-                             (vacietis.c:- 'vacietis.c:ptr-)
-                             (vacietis.c:-= 'vacietis.c:ptr-=)
-                             (vacietis.c:< 'vacietis.c:ptr<)
-                             (vacietis.c:<= 'vacietis.c:ptr<=)
-                             (vacietis.c:> 'vacietis.c:ptr>)
-                             (vacietis.c:>= 'vacietis.c:ptr>=)
-                             (vacietis.c:== 'vacietis.c:ptr==)
-                             (vacietis.c:!= 'vacietis.c:ptr!=)
+                             (vacietis.c:+= 'vacietis.c::alien-ptr+=)
+                             (vacietis.c:- 'vacietis.c::alien-ptr-)
+                             (vacietis.c:-= 'vacietis.c::alien-ptr-=)
+                             (vacietis.c:< 'vacietis.c::alien-ptr<)
+                             (vacietis.c:<= 'vacietis.c::alien-ptr<=)
+                             (vacietis.c:> 'vacietis.c::alien-ptr>)
+                             (vacietis.c:>= 'vacietis.c::alien-ptr>=)
+                             (vacietis.c:== 'vacietis.c::alien-ptr==)
+                             (vacietis.c:!= 'vacietis.c::alien-ptr!=)
                              (t op))
                            lvalue
                            (if (and (constantp rvalue) (numberp rvalue))
@@ -643,12 +663,14 @@
                           (let ((prev (elt exp (1- it))))
                             (or (find prev *ops*) (cast? prev))))
                      (awhen (position-if (lambda (x)
-                                           (not (or (find x *ops*)
+                                           (not (or (and (find x *ops*)
+                                                         (not (member x '(vacietis.c:++ vacietis.c:--))))
                                                     (cast? x))))
                                          exp
                                          :start     start
                                          :end          it
                                          :from-end      t)
+                       (dbg "hmmm...ambiguous operator?~%")
                        (return-from parse-infix (parse-binary (1+ it))))
                      (return-from parse-infix (parse-binary it)))))
           ;; unary operators
@@ -656,11 +678,12 @@
                    ;;(dbg "parse-rest: i: ~S  end: ~S~%" i end)
                    (parse-infix exp (1+ i) end)))
             (loop for i from start below end for x = (aref exp i) do
+                 ;;(dbg "unary? ~S~%" x)
                  (cond ((cast? x)                               ;; cast
                         ;;(dbg "cast: x: ~S~%" x)
                         (return-from parse-infix (parse-rest i)))
                        ((find x #(vacietis.c:++ vacietis.c:--)) ;; inc/dec
-                        (dbg "inc/dec: ~S~%" x)
+                        ;;(dbg "inc/dec: ~S~%" x)
                         (return-from parse-infix
                           (let* ((postfix? (< start i))
                                  (place    (if postfix?
@@ -700,7 +723,7 @@
                                 `(prog1 ,place ,set-exp)
                                 set-exp))))
                        ((find x *possible-prefix-ops*)          ;; prefix op
-                        ;;(dbg "prefix op: ~S  i: ~S~%" x i)
+                        (dbg "prefix op: ~S  i: ~S~%" x i)
                         (return-from parse-infix
                           (if (eq x 'vacietis.c:sizeof)
                               (let ((type-exp (aref exp (1+ i))))
@@ -721,6 +744,7 @@
                                      (dbg "rest type: ~S~%" type)
                                      (list 'vacietis.c:mkptr& rest)))
                                   (t
+                                   (dbg "  -> x: ~S rest: ~S~%" x rest)
                                    (list* (case x
                                             (vacietis.c:- '-)
                                             (vacietis.c:* 'vacietis.c:deref*)
@@ -832,6 +856,17 @@
 
 (defvar *function-name*)
 
+(defun copy-hash-table (hash-table)
+  (let ((copy (make-hash-table
+               :test (hash-table-test hash-table)
+               :rehash-size (hash-table-rehash-size hash-table)
+               :rehash-threshold (hash-table-rehash-threshold hash-table)
+               :size (hash-table-size hash-table))))
+    (loop for key being each hash-key of hash-table
+       using (hash-value value)
+       do (setf (gethash key copy) value))
+    copy))
+
 (defun read-control-flow-statement (statement)
   (flet ((read-block-or-statement ()
            (let ((next-char (next-char)))
@@ -914,19 +949,21 @@
                   (read-error "No 'while' following a 'do'"))))
           (vacietis.c:for
             `(vacietis.c:for
-                 ,(let* ((*local-var-types*       (make-hash-table)) ;; XXX don't we need the local-vars previously declared?
-                         (*variable-declarations* ()) ;; c99, I think?
-                         (*variable-lisp-type-declarations* ())
-                         (initializations         (progn
-                                                    (next-char)
-                                                    (read-c-statement
-                                                     (next-char)))))
-                        (list* *variable-declarations*
-                               initializations
-                               (map 'list
-                                    #'parse-infix
-                                    (c-read-delimited-list #\( #\;))))
-               ,(read-block-or-statement)))))))
+              ,(let* ((*local-var-types* (if *local-var-types*
+                                             (copy-hash-table *local-var-types*)
+                                             (make-hash-table)))
+                      (*variable-declarations* ()) ;; c99, I think?
+                      (*variable-lisp-type-declarations* ())
+                      (initializations (progn
+                                         (next-char)
+                                         (read-c-statement
+                                          (next-char)))))
+                     (list* *variable-declarations*
+                            initializations
+                            (map 'list
+                                 #'parse-infix
+                                 (c-read-delimited-list #\( #\;))))
+              ,(read-block-or-statement)))))))
 
 (defun read-function (name result-type)
   (let (arglist
@@ -944,6 +981,11 @@
                    (arg-type
                     (when (and (vectorp param) (c-type? (aref param 0)))
                       (aref param 0))))
+               ;; XXX
+               (when (eq 'vacietis.c:const arg-type)
+                 (when (and (vectorp param) (c-type? (aref param 1)))
+                   (setq arg-type (aref param 1))))
+               (dbg "param: arg-type: ~S~%" arg-type)
                (labels ((strip-type (x)
                           (cond ((symbolp x)
                                  (when (> ptrlev 0)
@@ -1515,29 +1557,59 @@
                  (make-c-variable :name name
                                   :type type))
            (if (boundp '*variable-declarations*)
-               (progn (push `(,name ,@(if initial-value
-                                          (list initial-value)
-                                          (list (preallocated-value-exp-for type))))
-                            *variable-declarations*)
-                      (dbg "variable declaration: ~S ~S~%" type name)
-                      (push (lisp-type-declaration-for type name)
-                            *variable-lisp-type-declarations*))
+               (let* ((value-type type)
+                      (value (if initial-value
+                                 (if (and *use-alien-types* (pointer-to-p type))
+                                     `(copy-c-pointer ,initial-value)
+                                     initial-value)
+                                 (preallocated-value-exp-for type))))
+                 (push `(,name ,@(when value (list value)))
+                       *variable-declarations*)
+                 (when (or (pointer-to-p value-type)
+                           (array-type-p value-type))
+                   (push `(dynamic-extent ,name)
+                         *variable-lisp-type-declarations*))
+                 (dbg "variable declaration: ~S ~S~%" type name)
+                 (push (lisp-type-declaration-for type name)
+                       *variable-lisp-type-declarations*))
                (unless *is-extern*
                  ;;(dbg "global ~S type: ~S initial-value: ~S~%" name type initial-value)
-                 (let* ((defop 'defparameter)
-                        (varname name)
-                        (varvalue (or initial-value
-                                      (preallocated-value-exp-for type)))
-                        (declamation `(declaim (type ,(lisp-type-for type) ,varname))))
-                   (dbg "declamation: ~S~%" declamation)
-                   (verbose "global ~S~%" declamation)
-                   (push declamation
-                         decl-code)
-                   (push `(locally (declare
-                                    ,*optimize*)
-                            (,defop ,varname
-                                ,varvalue))
-                         decl-code))))))
+                 (cond
+                   ((and (primitive-type? type)
+                         (not (pointer-to-p type)))
+                    (let* ((alien-type (alien-type-for type))
+                           (size (* 3 (eval `(sb-alien:alien-size ,alien-type :bytes))))
+                           (getter (sap-get-ref-for type))
+                           (buffer-tmpsym (gensym))
+                           (varname name)
+                           (varvalue (or initial-value
+                                         (preallocated-value-exp-for type)))
+                           (pointer-sym (intern (format nil "POINTER-~A" (symbol-name varname)))))
+                      (push `(declaim (type c-pointer ,pointer-sym))
+                            decl-code)
+                      (push `(locally (declare ,*optimize*)
+                               (let ((,buffer-tmpsym (make-array ,size :element-type '(unsigned-byte 8))))
+                                 (defparameter ,pointer-sym (array-backed-c-pointer-of ,buffer-tmpsym))
+                                 (setf (,getter (c-pointer-sap ,pointer-sym) (c-pointer-offset ,pointer-sym))
+                                       ,varvalue)))
+                            decl-code)
+                      (eval `(define-symbol-macro ,varname (,getter (c-pointer-sap ,pointer-sym) (c-pointer-offset ,pointer-sym))))
+                      (push `(define-symbol-macro ,varname (,getter (c-pointer-sap ,pointer-sym) (c-pointer-offset ,pointer-sym)))
+                            decl-code)))
+                   (t
+                    (let* ((defop 'defparameter)
+                           (varname name)
+                           (varvalue (or initial-value
+                                         (preallocated-value-exp-for type)))
+                           (declamation `(declaim (type ,(lisp-type-for type) ,varname))))
+                      (dbg "declamation: ~S~%" declamation)
+                      (verbose "global ~S~%" declamation)
+                      (push declamation
+                            decl-code)
+                      (push `(locally (declare ,*optimize*)
+                               (,defop ,varname
+                                   ,varvalue))
+                            decl-code))))))))
     (if decl-code
         (cons 'progn (nreverse decl-code))
         t)))

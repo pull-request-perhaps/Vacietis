@@ -13,9 +13,9 @@
             :components
             ((:file "package")
              (:file "state")
-             (:file "implementation")
              (:file "libc-support")
              (:file "type")
+             (:file "implementation" :depends-on ("type"))
              (:file "reader")
              (:file "vac" :depends-on ("reader"))))
    (:module :libc

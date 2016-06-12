@@ -17,7 +17,8 @@
   `(progn
      (defun ,name ,arglist
        ,@body)
-     (defparameter ,name (vacietis.c:mkptr& (symbol-function ',name)))))
+     (unless *use-alien-types*
+       (defparameter ,name (vacietis.c:mkptr& (symbol-function ',name))))))
 
 (defun include-libc-file (include-file)
   (let ((libc-package (find-package (format nil "VACIETIS.LIBC.~:@(~A~)"

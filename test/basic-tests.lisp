@@ -181,7 +181,9 @@ strlen(\"foobar\");"
   6)
 
 (eval-test reverse
-  "void reverse(char *str) {
+  "
+#include <string.h>
+void creverse(char *str) {
   char * end = str;
   char tmp;
 
@@ -200,9 +202,10 @@ strlen(\"foobar\");"
   }
 }
 
-char *foo = \"foobar\";
-reverse(foo);
-0+foo;"
+char foo[7];
+strcpy(foo, \"foobar\");
+creverse(foo);
+foo;"
   "raboof")
 
 (eval-test strcmp
