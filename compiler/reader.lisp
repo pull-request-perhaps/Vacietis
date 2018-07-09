@@ -231,15 +231,22 @@
 (defvar preprocessor-if-stack ())
 
 (defun pp-read-line ()
-  (let (comment-follows?)
+  (let (comment-follows?
+	(escaped-newline? nil))
    (prog1
        (slurp-while (lambda (c)
-                      (case c
-                        (#\Newline)
-                        (#\/ (if (find (peek-char nil %in nil nil) "/*")
-                                 (progn (setf comment-follows? t) nil)
-                                 t))
-                        (t t))))
+		      (case c
+			(#\\
+			 (setf escaped-newline? t) t)
+			(#\Newline escaped-newline?)
+			(#\/
+			 (setf escaped-newline? nil) 
+			 (if (find (peek-char nil %in nil nil) "/*")
+				 (progn (setf comment-follows? t) nil)
+				 t))
+			(t
+			 (setf escaped-newline? nil) 
+			 t))))
      (c-read-char)
      (when comment-follows?
        (%maybe-read-comment)))))
@@ -315,18 +322,22 @@
   (declare (ignore sharp))
   ;; preprocessor directives need to be read in a separate namespace
   (let ((pp-directive (read-c-identifier (next-char))))
+    ;(format t "FUCKCKCKK ~a" pp-directive)
     (case pp-directive
       (vacietis.c:define
        (setf (lookup-define)
-             (if (eql #\( (peek-char nil %in)) ;; no space between identifier and left paren
-                 (let ((args     (c-read-delimited-strings t))
-                       (template (string-trim '(#\Space #\Tab) (pp-read-line))))
-                   ;;(dbg "read left paren...~%")
-                   (lambda (substitutions)
-                     (if args
-                         (fill-in-template args template substitutions)
-                         template)))
-                 (pp-read-line))))
+	     (let ((fuck1 (eql #\( (peek-char nil %in))))
+;	       (print fuck1)
+	       (if  fuck1;; no space between identifier and left paren
+		   (let ((args     (c-read-delimited-strings t))
+			 (template (string-trim '(#\Space #\Tab) (pp-read-line))))
+;		     (print args)
+		     ;;(dbg "read left paren...~%")
+		     (lambda (substitutions)
+		       (if args
+			   (fill-in-template args template substitutions)
+			   template)))
+		   (pp-read-line)))))
       (vacietis.c:undef
        (remhash (read-c-identifier (next-char))
                 (compiler-state-pp *compiler-state*))
@@ -1636,7 +1647,6 @@
 (defun read-var-or-function-declaration (base-type)
   "Reads a variable(s) or function declaration"
   (dbg "read-var-or-function-declaration: ~S~%" base-type)
- ; (format t "~&read-var-or-function-declaration: ~S~%" base-type)
   
   (let ((type base-type)
         name
@@ -1652,6 +1662,7 @@
                (t
                 (c-unread-char c)
                 (return))))
+ ;   (format t "~&~a" name)
     (let ((next (next-char)))
       (c-unread-char next)
       (if (and name (eql #\( next))
@@ -1675,48 +1686,57 @@
   (cond
     (*is-unsigned*
      (case base-type
-       ('vacietis.c:char   'vacietis.c:unsigned-char)
-       ('vacietis.c:short  'vacietis.c:unsigned-short)
-       ('vacietis.c:int    'vacietis.c:unsigned-int)
-       ('vacietis.c:long   'vacietis.c:unsigned-long)
+       (vacietis.c:char   'vacietis.c:unsigned-char)
+       (vacietis.c:short  'vacietis.c:unsigned-short)
+       (vacietis.c:int    'vacietis.c:unsigned-int)
+       (vacietis.c:long   'vacietis.c:unsigned-long)
        (t base-type)))
     (t base-type)))
 
 (defun read-base-type (token)
   (dbg "read-base-type: ~S~%" token)
-  (loop while (type-qualifier? token)
-     do
-       (dbg "type qualifier token: ~S~%" token)
-       (case token
-         (vacietis.c:extern
-          (setq *is-extern* t))
-         (vacietis.c:inline
-          (setq *is-inline* t))
-         (vacietis.c:unsigned
-          (setq *is-unsigned* t))
-         (vacietis.c:const
-          (setq *is-const* t)))
-       (setf token (next-exp)))
-  (awhen (gethash token (compiler-state-typedefs *compiler-state*))
-    (setf token it))
-  (cond ((eq token 'vacietis.c:enum)
-         (values (make-enum-type :name (next-exp)) t))
-        ((eq token 'vacietis.c:struct)
-         (dbg "  -> struct~%")
-         (if (eql #\{ (peek-char t %in))
-             (progn
-               (c-read-char)
-               (values (read-struct-decl-body (make-struct-type)) t))
-             (let ((name (next-exp)))
-               (dbg "  -> struct name: ~S~%" name)
-               (values (or (gethash name (compiler-state-structs *compiler-state*))
-                           (make-struct-type :name name)) t))))
-        ((or (basic-type? token) (c-type-p token))
-         (values (modify-base-type token) nil))
-        (t
-	 token
-	 #+nil
-         (read-error "Unexpected parser error: unknown type ~A" token))))
+  (let (fuck)
+    (loop while (type-qualifier? token)
+       do
+	 (dbg "type qualifier token: ~S~%" token)
+	 (case token
+	   (vacietis.c:extern
+	    (setq *is-extern* t))
+	   (vacietis.c:inline
+	    (setq *is-inline* t))
+	   (vacietis.c:unsigned
+	    (setq *is-unsigned* t))
+	   (vacietis.c:const
+	    (setq *is-const* t)))
+	 (setf fuck (file-position %in))
+	 (setf token (next-exp)))
+    #+nil
+    (awhen (gethash token (compiler-state-typedefs *compiler-state*))
+      (setf token it))
+    (cond ((eq token 'vacietis.c:enum)
+	   (values (make-enum-type :name (next-exp)) t))
+	  ((eq token 'vacietis.c:struct)
+	   (dbg "  -> struct~%")
+	   (if (eql #\{ (peek-char t %in))
+	       (progn
+		 (c-read-char)
+		 (values (read-struct-decl-body (make-struct-type)) t))
+	       (let ((name (next-exp)))
+		 (dbg "  -> struct name: ~S~%" name)
+		 (values (or (gethash name (compiler-state-structs *compiler-state*))
+			     (make-struct-type :name name))
+			 t))))
+	  ((or (basic-type? token) (c-type-p token))
+	   (values (modify-base-type token) nil))
+	  (t
+	   (values
+	    (if *is-unsigned*
+		(prog1 'vacietis.c:unsigned-int
+		  (file-position %in fuck))
+		token)
+	    nil)
+	   #+nil
+	   (read-error "Unexpected parser error: unknown type ~A" token)))))
 
 (defun read-struct-decl-body (struct-type)
   (let ((slot-index 0)
@@ -1850,10 +1870,15 @@
 		  (read-infix-exp token)))))))
 
 (defun read-c-statement (c)
+;  (print c)
   (case c
     (#\# (read-c-macro %in c))
     (#\; (values))
-    (t   (%read-c-statement (read-c-exp c)))))
+    (t
+  ;   (print (file-position %in))
+     (let ((wot (read-c-exp c)))
+  ;     (print (file-position %in))
+       (%read-c-statement wot)))))
 
 (defun read-c-identifier (c)
   ;; assume inverted readtable (need to fix for case-preserving lisps)
@@ -1902,45 +1927,56 @@
    :elements (map 'list #'parse-infix (c-read-delimited-list #\{ #\,))))
 
 (defun read-c-exp (c)
+ ; (print c)
+ ; (print (file-position %in))
   (or (match-longest-op c)
+      ;(progn (print (file-position %in)))
       (cond ((digit-char-p c) (read-c-number c))
-            ((or (eql c #\_) (alpha-char-p c))
-             (let ((symbol (read-c-identifier c)))
-               ;;(dbg "~S -> symbol: ~S~%" c symbol)
-               #+nil
-               (when (eq t symbol)
-                 (setq symbol '__c_t))
-               (acond
-                 ((gethash symbol (compiler-state-pp *compiler-state*))
-                  ;;(describe it)
-                  (setf *macro-stream*
-                        (make-string-input-stream
-                         (etypecase it
-                           (string
-                            it)
-                           (function
-                            (funcall it (c-read-delimited-strings)))))
-                        %in
-                        (make-concatenated-stream *macro-stream* %in))
-                  ;;(dbg "read-c-exp...~%")
-                  (read-c-exp (next-char)))
-                 ((gethash symbol (compiler-state-enums *compiler-state*))
-                  ;;(dbg "returning it...~%")
-                  it)
-                 (t
-                  symbol))))
-            (t
-             (case c
-               (#\" (read-c-string %in c))
-               (#\' (read-character-constant %in c))
-               (#\( (read-exps-until (lambda (c) (eql #\) c))))
-               (#\{ (read-vector-literal)) ;; decl only
-               (#\[ (list 'vacietis.c:[]
-                          (read-exps-until (lambda (c) (eql #\] c))))))))))
+	    ((or (eql c #\_)
+		 (alpha-char-p c))
+	     (let ((symbol (read-c-identifier c)))
+	       ;;(dbg "~S -> symbol: ~S~%" c symbol)
+	       #+nil
+	       (when (eq t symbol)
+		 (setq symbol '__c_t))
+;	       (print %in)
+	       (acond
+		 ((gethash symbol (compiler-state-pp *compiler-state*))
+		  ;;(describe it)
+		  #+nil
+		  (setf *macro-stream*
+			(make-string-input-stream
+			 (etypecase it
+			   (string
+			    it)
+			   (function
+			    (funcall it (c-read-delimited-strings)))))
+			%in
+			(make-concatenated-stream *macro-stream* %in))
+		  ;;(dbg "read-c-exp...~%")
+	;	  (print %in)
+	;	  (print (file-position %in))
+		  (let ((a-char (next-char)))
+	;	    (print a-char)
+		    (read-c-exp a-char)))
+		 ((gethash symbol (compiler-state-enums *compiler-state*))
+		  ;;(dbg "returning it...~%")
+		  it)
+		 (t
+		  symbol))))
+	    (t
+	     (case c
+	       (#\" (read-c-string %in c))
+	       (#\' (read-character-constant %in c))
+	       (#\( (read-exps-until (lambda (c) (eql #\) c))))
+	       (#\{ (read-vector-literal)) ;; decl only
+	       (#\[ (list 'vacietis.c:[]
+			  (read-exps-until (lambda (c) (eql #\] c))))))))))
 
 ;;; readtable
 
 (defun read-c-toplevel (%in c)
+  (print 12312312)
   (let* ((*macro-stream* nil)
          (exp1           (read-c-statement c)))
     ;;(dbg "toplevel: ~S~%" exp1)
