@@ -341,12 +341,14 @@
                (slurp-while (lambda (c) (char/= c delimiter)))))
          (next-char)
          (if (char= delimiter #\")
-             (%load-c-file (merge-pathnames
-                            include-file
-                            (directory-namestring
-                             (or *load-truename* *compile-file-truename*
-                                 *default-pathname-defaults*)))
-                           *compiler-state*)
+	     (progn
+	       #+nil
+	      (%load-c-file (merge-pathnames
+			     include-file
+			     (directory-namestring
+			      (or *load-truename* *compile-file-truename*
+				  *default-pathname-defaults*)))
+			    *compiler-state*))
              (include-libc-file include-file))))
       (vacietis.c:if
        (push 'if preprocessor-if-stack)
@@ -801,8 +803,14 @@
                             for next = (position 'vacietis.c:|,| x :start xstart)
                             when (< 0 (length x))
                               collect (parse-infix x xstart (or next (length x)))
-                            while next do (setf xstart (1+ next)))))))))
-          (read-error "Error parsing expression: ~A" (subseq exp start end))))
+			 while next do (setf xstart (1+ next)))))))))
+	  (return-from parse-infix "nope")
+	  #+nil
+          (read-error "Error parsing expression: ~A"
+		      (progn (print exp)
+			     (print start)
+			     (print end)
+			     (subseq exp start end)))))
       (progn
         (let ((type (c-type-of-exp exp)))
           ;;(dbg "type of ~S: ~S~%" exp type)
@@ -1744,15 +1752,24 @@
   (cond ((struct-type-p base-type)
          (let ((names (read-struct base-type t)))
            (dbg "typedef read-struct names: ~S~%" names)
+	   #+nil
            (dolist (name names)
              (when (symbolp name) ;; XXX handle pointer and array typedefs
                (setf (gethash name (compiler-state-typedefs *compiler-state*)) base-type)))
-           t))
+	   (list names
+		 base-type)
+           ;t
+	   ))
         (t
          (multiple-value-bind (name type)
              (process-variable-declaration (read-infix-exp (next-exp)) base-type)
+	   (declare (ignorable name type))
+	   #+nil
            (setf (gethash name (compiler-state-typedefs *compiler-state*)) type)
-           t))))
+	   (list name
+		 type)
+           ;t
+	   ))))
 
 (defun read-declaration (token)
   (cond ((eq 'vacietis.c:typedef token)
@@ -1761,7 +1778,8 @@
                   (*is-const* nil)
                   (*is-unsigned* nil)
                   (base-type (read-base-type (next-exp))))
-             (read-typedef base-type))))
+             (read-typedef base-type)
+	     )))
         ((c-type? token)
          (let* ((*is-inline* nil)
                 (*is-extern* nil)
@@ -1956,3 +1974,16 @@
 
 (defun load-c-file (file)
   (%load-c-file file (make-compiler-state)))
+
+(defun wow (*c-file* &optional (*compiler-state* (make-compiler-state)))
+  (let ((*readtable*   c-readtable)
+        (*line-number* 1))
+    (with-open-file (stream *c-file*)
+      (let ((eof (list nil)))
+	(loop
+	   (let ((value
+		  (read stream nil eof)))
+	     (if (eq value eof)
+		 (return)
+		 (print value)
+		 )))))))
