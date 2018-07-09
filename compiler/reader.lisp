@@ -1763,6 +1763,14 @@
              (read-variable-declarations (vector (read-c-exp it))
                                          struct-type)))))
 
+(defun read-infix-exp (next-token)
+  (let ((exp (make-buffer)))
+    (vector-push-extend next-token exp)
+    (loop for c = (next-char nil)
+          until (or (eql c #\;) (null c))
+          do (vector-push-extend (read-c-exp c) exp))
+    (parse-infix exp)))
+
 (defun read-typedef (base-type)
   (dbg "read-typedef: ~S~%" base-type)
   (cond ((struct-type-p base-type)
@@ -1777,15 +1785,19 @@
            ;t
 	   ))
         (t
-         (multiple-value-bind (name type)
-             (process-variable-declaration (read-infix-exp (next-exp)) base-type)
-	   (declare (ignorable name type))
+	 (let* ((token (next-exp))
+		(wot (read-infix-exp token)))
+;	   (print wot)
+	   (list token
+		 base-type)
 	   #+nil
-           (setf (gethash name (compiler-state-typedefs *compiler-state*)) type)
-	   (list name
-		 type)
-           ;t
-	   ))))
+	   (multiple-value-bind (name type)
+	       (process-variable-declaration wot base-type)
+	     (declare (ignorable name type))
+	     #+nil
+	     (setf (gethash name (compiler-state-typedefs *compiler-state*)) type)
+					;t
+	     )))))
 
 (defun read-declaration (token)
   (cond ((eq 'vacietis.c:typedef token)
