@@ -253,9 +253,20 @@
      (when comment-follows?
        (%maybe-read-comment)))))
 
+(symbol-macrolet ((body (gethash def
+				 (compiler-state-pp *compiler-state*))))
+  (defun (setf get-pp-def) (var def)
+    (setf
+     body
+     var)) 
+  (defun get-pp-def (def)
+    body))
+
 (defmacro lookup-define ()
-  `(gethash (read-c-identifier (next-char))
-            (compiler-state-pp *compiler-state*)))
+  `(get-pp-def (read-c-identifier (next-char))))
+
+(defmacro defined (value)
+  `(get-pp-def ,(string value)))
 
 (defun starts-with? (str x)
   (string= str x :end1 (min (length str) (length x))))
@@ -282,13 +293,16 @@
   (let ((exp (with-input-from-string (%in line)
                (read-infix-exp (read-c-exp (next-char))))))
     (dbg "preprocessor-test: ~S~%" exp)
-    (eval `(symbol-macrolet
-               ,(let ((x))
-                     (maphash (lambda (k v)
-                                (push (list k v) x))
-                              (compiler-state-pp *compiler-state*))
-                     x)
-             ,exp))))
+    (let ((wtf
+	   `(symbol-macrolet
+		,(let ((x))
+		      (maphash (lambda (k v)
+				 (push (list k v) x))
+			       (compiler-state-pp *compiler-state*))
+		      x)
+	      ,exp)))
+ ;     (print wtf)
+      (eval wtf))))
 
 (defun fill-in-template (args template subs)
   (ppcre:regex-replace-all
@@ -1673,16 +1687,21 @@
           (read-variable-declarations spec-so-far base-type)))))
 
 (defun read-enum-decl ()
-  (when (eql #\{ (peek-char t %in))
-    (next-char)
-    (let ((enums (c-read-delimited-list #\{ #\,)))
-      ;; fixme: assigned values to enum names
-      (loop for name across enums for i from 0 do
-           (setf (gethash (elt name 0) (compiler-state-enums *compiler-state*))
-                 i))))
-  (if (eql #\; (peek-char t %in))
-      (progn (next-char) t)
-      (read-variable-declarations #() 'vacietis.c:int)))
+  (let ((ret :no-enum-here))
+    (when (eql #\{ (peek-char t %in))
+      (next-char)
+      (let ((enums (c-read-delimited-list #\{ #\,)))
+	(setf ret enums)
+	;; fixme: assigned values to enum names
+	(loop for name across enums for i from 0 do
+	     (setf (gethash (elt name 0) (compiler-state-enums *compiler-state*))
+		   i))))
+    (if (eql #\; (peek-char t %in))
+	(progn (next-char)
+	       ret
+	       ;;t
+	       )
+	(read-variable-declarations #() 'vacietis.c:int))))
 
 
 (defun mehtype (tokens)
@@ -1752,18 +1771,31 @@
     (awhen (gethash token (compiler-state-typedefs *compiler-state*))
       (setf token it))
     (cond ((eq token 'vacietis.c:enum)
-	   (values (make-enum-type :name (next-exp)) t))
+	   (print 3234234234)
+	   (let ((name (next-exp))
+;		 (huh (next-exp))
+		 )
+	     (values
+	      name
+	      t
+	      'enum)
+;	     (values (make-enum-type :name huh) t)
+	     ))
 	  ((eq token 'vacietis.c:struct)
 	   (dbg "  -> struct~%")
 	   (if (eql #\{ (peek-char t %in))
 	       (progn
 		 (c-read-char)
-		 (values (read-struct-decl-body (make-struct-type)) t))
+		 (values (read-struct-decl-body (make-struct-type))
+			 t
+			 'struct
+			 ))
 	       (let ((name (next-exp)))
 		 (dbg "  -> struct name: ~S~%" name)
 		 (values (or (gethash name (compiler-state-structs *compiler-state*))
 			     (make-struct-type :name name))
-			 t))))
+			 t
+			 'struct))))
 	  (t
 	   (mehtype tokens)
 	   #+nil
@@ -1869,13 +1901,19 @@
                 (*is-extern* nil)
                 (*is-const* nil)
                 (*is-unsigned* nil))
-           (multiple-value-bind (base-type is-decl)
+           (multiple-value-bind (base-type is-decl other-type)
                (read-base-type token)
              (dbg "read-declaration base-type: ~S~%" base-type)
 	     ;;	     (format t "~&read-declaration base-type: ~S~% ~S~% ~S~%" base-type token is-decl)
 	     (if (char= (peek-char nil %in) #\()
 		 (read-c-exp (next-char))
 		 (if is-decl
+		     (case other-type
+		       ((struct)
+			(read-struct base-type))
+		       ((enum)
+			(list 'enum base-type (read-enum-decl))))
+		     #+nil
 		     (cond ((struct-type-p base-type)
 			    (read-struct base-type))
 			   ((enum-type-p base-type)
@@ -1908,6 +1946,7 @@
 		  (read-infix-exp token)))))))
 
 (defun read-c-statement (c)
+;  (print (file-position %in))
 ;  (print c)
   (case c
     (#\# (read-c-macro %in c))
