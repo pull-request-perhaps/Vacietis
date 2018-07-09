@@ -1,7 +1,5 @@
 (in-package #:vacietis)
 
-(in-readtable vacietis)
-
 ;;(declaim (optimize (debug 3)))
 (declaim (optimize (speed 3) (debug 0) (safety 1)))
 
@@ -58,7 +56,6 @@
 (defvar *is-extern*)
 (defvar *is-const*)
 (defvar *is-unsigned*)
-(defvar *is-long*)
 
 ;;; a C macro can expand to several statements; READ should return all of them
 
@@ -1688,62 +1685,91 @@
       (read-variable-declarations #() 'vacietis.c:int)))
 
 (defun modify-base-type (base-type)
+  (print 342432342342342342)
+  (print base-type)
   (cond
     (*is-unsigned*
      (case base-type
        (vacietis.c:char   'vacietis.c:unsigned-char)
        (vacietis.c:short  'vacietis.c:unsigned-short)
-       (vacietis.c:int    'vacietis.c:unsigned-int)
        (vacietis.c:long   'vacietis.c:unsigned-long)
+       (vacietis.c:long   'vacietis.c:unsigned-long-long)
        (t base-type)))
     (t base-type)))
 
+
+(defun mehtype (tokens)
+  (cond ((find 'vacietis.c:char tokens) ;;char
+	 (if (find 'vacietis.c:unsigned tokens)
+	     'vacietis.c:unsigned-char
+	     'vacietis.c:char))
+	((find 'vacietis.c:short tokens) ;;short
+	 (if (find 'vacietis.c:unsigned tokens)
+	     'vacietis.c:unsigned-short
+	     'vacietis.c:short))
+	((find 'vacietis.c:long tokens) ;;longs
+	 (if (< 1 (count 'vacietis.c:long tokens))
+	     (if (find 'vacietis.c:unsigned tokens)
+		 'vacietis.c:unsigned-long-long
+		 'vacietis.c:long-long)
+	     (if (find 'vacietis.c:double tokens)
+		 'vacietis.c:long-double 
+		 (if (find 'vacietis.c:unsigned tokens)
+		     'vacietis.c:unsigned-long
+		     'vacietis.c:long))))
+	((find 'vacietis.c:signed tokens)
+	 'vacietis.c:int)
+	((find 'vacietis.c:unsigned tokens)
+	 'vacietis.c:unsigned-int)
+	(t )))
+
+
+
 (defun read-base-type (token)
   (dbg "read-base-type: ~S~%" token)
-  (let ((*is-long* 0))
+  (let ((tokens nil))
+    (map nil
+	 (lambda (token)
+	   (case token
+	     (vacietis.c:extern
+	      (setq *is-extern* t))
+	     (vacietis.c:inline
+	      (setq *is-inline* t))
+	     (vacietis.c:const
+	      (setq *is-const* t))	   
+	     (vacietis.c:unsigned
+	      (setq *is-unsigned* t))))
+	 tokens)
     (loop while (type-qualifier? token)
        do
 	 (dbg "type qualifier token: ~S~%" token)
-	 (case token
-	   (vacietis.c:extern
-	    (setq *is-extern* t))
-	   (vacietis.c:inline
-	    (setq *is-inline* t))
-	   (vacietis.c:unsigned
-	    (setq *is-unsigned* t))
-	   (vacietis.c:const
-	    (setq *is-const* t))
-	   (vacietis.c:long
-	    (incf *is-long*)))
+	 (push token tokens)
 	 (setf token (next-exp)))
-    #+nil
-    (awhen (gethash token (compiler-state-typedefs *compiler-state*))
-      (setf token it))
-    (cond ((eq token 'vacietis.c:enum)
-	   (values (make-enum-type :name (next-exp)) t))
-	  ((eq token 'vacietis.c:struct)
-	   (dbg "  -> struct~%")
-	   (if (eql #\{ (peek-char t %in))
-	       (progn
-		 (c-read-char)
-		 (values (read-struct-decl-body (make-struct-type)) t))
-	       (let ((name (next-exp)))
-		 (dbg "  -> struct name: ~S~%" name)
-		 (values (or (gethash name (compiler-state-structs *compiler-state*))
-			     (make-struct-type :name name))
-			 t))))
-	  ((or (basic-type? token)
-	       (c-type-p token))
-	   (values (modify-base-type token)
-		   nil))
-	  (t
-	   (values
-	    token
-	    nil)
-	   #+nil
-	   (values
-	    (read-error "Unexpected parser error: unknown type ~A" token)
-	    nil)))))
+    (mehtype tokens))
+  #+nil
+  (awhen (gethash token (compiler-state-typedefs *compiler-state*))
+    (setf token it))
+  (cond ((eq token 'vacietis.c:enum)
+	 (values (make-enum-type :name (next-exp)) t))
+	((eq token 'vacietis.c:struct)
+	 (dbg "  -> struct~%")
+	 (if (eql #\{ (peek-char t %in))
+	     (progn
+	       (c-read-char)
+	       (values (read-struct-decl-body (make-struct-type)) t))
+	     (let ((name (next-exp)))
+	       (dbg "  -> struct name: ~S~%" name)
+	       (values (or (gethash name (compiler-state-structs *compiler-state*))
+			   (make-struct-type :name name))
+		       t))))
+	(t
+	 (values
+	  token
+	  nil)
+	 #+nil
+	 (values
+	  (read-error "Unexpected parser error: unknown type ~A" token)
+	  nil))))
 
 (defun read-struct-decl-body (struct-type)
   (let ((slot-index 0)
@@ -1894,7 +1920,8 @@
   (let* ((raw-name (concatenate
                     'string (string c)
                     (slurp-while (lambda (c)
-                                   (or (eql c #\_) (alphanumericp c))))))
+                                   (or (eql c #\_)
+				       (alphanumericp c))))))
          (raw-name-alphas (remove-if-not #'alpha-char-p raw-name))
          (identifier-name
           (format nil

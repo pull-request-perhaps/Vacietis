@@ -174,4 +174,8 @@
    #:unsigned-short
    #:unsigned-int
    #:unsigned-long
+   #:unsigned-long-long
+   
+   #:long-double
+   #:long-long
    ))
