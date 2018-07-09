@@ -18,6 +18,7 @@
              (:file "implementation" :depends-on ("type"))
              (:file "reader")
              (:file "vac" :depends-on ("reader"))))
+   #+nil
    (:module :libc
             :serial t
             :components
@@ -35,6 +36,7 @@
              (:file "string")
              (:static-file "string.c"))
             :depends-on (:compiler))
+   #+nil
    (:module :runtime
             :components
             ((:file "program"))

@@ -12,7 +12,11 @@
 (in-package #:vacietis.c)
 
 (cl:defparameter vacietis::*type-qualifiers*
-  #(inline static const signed unsigned extern auto register long))
+  #(inline static const
+    signed unsigned
+    extern auto register
+    long short
+    float double int char))
 
 (cl:defparameter vacietis::*ops*
   #(= += -= *= /= %= <<= >>= &= ^= |\|=| ? |:| |\|\|| && |\|| ^ & == != < > <= >= << >> ++ -- + - * / % ! ~ -> |.| |,|
@@ -1696,8 +1700,7 @@
 
 (defun read-base-type (token)
   (dbg "read-base-type: ~S~%" token)
-  (let (fuck
-	(*is-long* 0))
+  (let ((*is-long* 0))
     (loop while (type-qualifier? token)
        do
 	 (dbg "type qualifier token: ~S~%" token)
@@ -1712,7 +1715,6 @@
 	    (setq *is-const* t))
 	   (vacietis.c:long
 	    (incf *is-long*)))
-	 (setf fuck (file-position %in))
 	 (setf token (next-exp)))
     #+nil
     (awhen (gethash token (compiler-state-typedefs *compiler-state*))
@@ -1730,17 +1732,18 @@
 		 (values (or (gethash name (compiler-state-structs *compiler-state*))
 			     (make-struct-type :name name))
 			 t))))
-	  ((or (basic-type? token) (c-type-p token))
-	   (values (modify-base-type token) nil))
+	  ((or (basic-type? token)
+	       (c-type-p token))
+	   (values (modify-base-type token)
+		   nil))
 	  (t
 	   (values
-	    (if *is-unsigned*
-		(prog1 'vacietis.c:unsigned-int
-		  (file-position %in fuck))
-		token)
+	    token
 	    nil)
 	   #+nil
-	   (read-error "Unexpected parser error: unknown type ~A" token)))))
+	   (values
+	    (read-error "Unexpected parser error: unknown type ~A" token)
+	    nil)))))
 
 (defun read-struct-decl-body (struct-type)
   (let ((slot-index 0)
