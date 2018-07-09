@@ -1589,6 +1589,7 @@
          (decl-code  ()))
     (setf (aref decls 0) (concatenate 'vector spec-so-far (aref decls 0)))
     ;;(dbg "rvd: spec-so-far: ~S ~S~%" spec-so-far base-type)
+    #+nil
     (loop for x across decls
        do
          (multiple-value-bind (name type initial-value)
@@ -1771,10 +1772,11 @@
     (awhen (gethash token (compiler-state-typedefs *compiler-state*))
       (setf token it))
     (cond ((eq token 'vacietis.c:enum)
-	   (print 3234234234)
 	   (let ((name (next-exp))
 ;		 (huh (next-exp))
 		 )
+;	     (print token)
+;	     (print name)
 	     (values
 	      name
 	      t
@@ -1831,6 +1833,7 @@
 (defun read-struct (struct-type &optional for-typedef)
   (acase (next-char)
     (#\{ (read-struct-decl-body struct-type)
+	 #+nil
          (awhen (struct-type-name struct-type)
            (setf (gethash it (compiler-state-structs *compiler-state*))
                  struct-type))
@@ -1856,69 +1859,92 @@
           do (vector-push-extend (read-c-exp c) exp))
     (parse-infix exp)))
 
-(defun read-typedef (base-type)
-  (dbg "read-typedef: ~S~%" base-type)
-  (cond ((struct-type-p base-type)
-         (let ((names (read-struct base-type t)))
-           (dbg "typedef read-struct names: ~S~%" names)
-	   #+nil
-           (dolist (name names)
-             (when (symbolp name) ;; XXX handle pointer and array typedefs
-               (setf (gethash name (compiler-state-typedefs *compiler-state*)) base-type)))
-	   (list 'typedef
-		 names
-		 base-type)
-           ;t
-	   ))
-        (t
-	 (let* ((token (next-exp))
-		(wot (read-infix-exp token)))
-;	   (print wot)
-	   (list
-	    'typedef
-	    token
-	    base-type)
-	   #+nil
-	   (multiple-value-bind (name type)
-	       (process-variable-declaration wot base-type)
-	     (declare (ignorable name type))
-	     #+nil
-	     (setf (gethash name (compiler-state-typedefs *compiler-state*)) type)
-					;t
-	     )))))
 
 (defun read-declaration (token)
-  (cond ((eq 'vacietis.c:typedef token)
-         (let ((*is-unsigned* nil))
-           (let* ((*is-extern* nil)
-                  (*is-const* nil)
-                  (*is-unsigned* nil)
-                  (base-type (read-base-type (next-exp))))
-             (read-typedef base-type)
-	     )))
-        (t ;(c-type? token)
-         (let* ((*is-inline* nil)
-                (*is-extern* nil)
-                (*is-const* nil)
-                (*is-unsigned* nil))
-           (multiple-value-bind (base-type is-decl other-type)
-               (read-base-type token)
-             (dbg "read-declaration base-type: ~S~%" base-type)
-	     ;;	     (format t "~&read-declaration base-type: ~S~% ~S~% ~S~%" base-type token is-decl)
-	     (if (char= (peek-char nil %in) #\()
-		 (read-c-exp (next-char))
-		 (if is-decl
-		     (case other-type
-		       ((struct)
-			(read-struct base-type))
-		       ((enum)
-			(list 'enum base-type (read-enum-decl))))
-		     #+nil
-		     (cond ((struct-type-p base-type)
-			    (read-struct base-type))
-			   ((enum-type-p base-type)
-			    (read-enum-decl)))
-		     (read-var-or-function-declaration base-type))))))))
+  (cond
+ ;   #+nil
+    ((eq 'vacietis.c:typedef token)
+	 (let* ((*is-unsigned* nil)
+		(*is-extern* nil)
+		(*is-const* nil)
+		(*is-unsigned* nil))
+	   (multiple-value-bind  (base-type is-decl other-type)
+	       (read-base-type (next-exp))
+	     (declare (ignorable is-decl))
+	       ;;;read-typedef
+	     (dbg "read-typedef: ~S~%" base-type)
+	     (cond ((eq 'struct other-type) ;;;(struct-type-p base-type)
+		    (let ((names (read-struct base-type t)))
+		      (dbg "typedef read-struct names: ~S~%" names)
+		      #+nil
+		      (dolist (name names)
+			(when (symbolp name) ;; XXX handle pointer and array typedefs
+			  (setf (gethash name (compiler-state-typedefs *compiler-state*)) base-type)))
+		      (list 'struct
+			    names
+			    base-type)
+					;t
+		      ))
+		   ;;new
+		   ((eq 'enum other-type)
+		    (list
+		     'enum-???
+		     (c-read-delimited-list #\; #\,)
+		     base-type
+		     ))
+		   (t
+		    (let* ((token (next-exp))
+			   ;(wot)
+			   )
+		      (read-infix-exp token)
+					;	   (print wot)
+		      (list
+		       'typedef
+		       token
+		       base-type)
+		      #+nil
+		      (multiple-value-bind (name type)
+			  (process-variable-declaration wot base-type)
+			(declare (ignorable name type))
+			#+nil
+			(setf (gethash name (compiler-state-typedefs *compiler-state*)) type)
+					;t
+			))))))
+     )
+    (t ;(c-type? token)
+     (let ((typedef?
+	    (eq 'vacietis.c:typedef token)))
+       (let* ((*is-inline* nil)
+	      (*is-extern* nil)
+	      (*is-const* nil)
+	      (*is-unsigned* nil))
+	 (multiple-value-bind (base-type is-decl other-type)
+	     (read-base-type
+	      (if typedef?
+		  (next-exp)
+		  token))
+	   (dbg "read-declaration base-type: ~S~%" base-type)
+	   ;;	     (format t "~&read-declaration base-type: ~S~% ~S~% ~S~%" base-type token is-decl)
+	   (if (char= (peek-char nil %in) #\()
+	       (read-c-exp (next-char))
+	       (if is-decl
+		   (case other-type
+		     ((struct)
+		      (read-struct base-type typedef?))
+		     ((enum)
+		      (prog1
+			  (list 'enum base-type
+				(next-exp)
+					;(read-enum-decl)
+				)
+			(next-exp) ;;toss the semicolon ;
+			)))
+		   #+nil
+		   (cond ((struct-type-p base-type)
+			  (read-struct base-type))
+			 ((enum-type-p base-type)
+			  (read-enum-decl)))
+		   (read-var-or-function-declaration base-type)))))))))
 
 (defun read-labeled-statement (token)
   (when (eql #\: (peek-char t %in))
