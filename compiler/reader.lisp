@@ -12,7 +12,7 @@
 (in-package #:vacietis.c)
 
 (cl:defparameter vacietis::*type-qualifiers*
-  #(inline static const signed unsigned extern auto register))
+  #(inline static const signed unsigned extern auto register long))
 
 (cl:defparameter vacietis::*ops*
   #(= += -= *= /= %= <<= >>= &= ^= |\|=| ? |:| |\|\|| && |\|| ^ & == != < > <= >= << >> ++ -- + - * / % ! ~ -> |.| |,|
@@ -54,6 +54,7 @@
 (defvar *is-extern*)
 (defvar *is-const*)
 (defvar *is-unsigned*)
+(defvar *is-long*)
 
 ;;; a C macro can expand to several statements; READ should return all of them
 
@@ -1695,7 +1696,8 @@
 
 (defun read-base-type (token)
   (dbg "read-base-type: ~S~%" token)
-  (let (fuck)
+  (let (fuck
+	(*is-long* 0))
     (loop while (type-qualifier? token)
        do
 	 (dbg "type qualifier token: ~S~%" token)
@@ -1707,7 +1709,9 @@
 	   (vacietis.c:unsigned
 	    (setq *is-unsigned* t))
 	   (vacietis.c:const
-	    (setq *is-const* t)))
+	    (setq *is-const* t))
+	   (vacietis.c:long
+	    (incf *is-long*)))
 	 (setf fuck (file-position %in))
 	 (setf token (next-exp)))
     #+nil
@@ -1836,13 +1840,15 @@
            (multiple-value-bind (base-type is-decl)
                (read-base-type token)
              (dbg "read-declaration base-type: ~S~%" base-type)
-;	     (format t "~&read-declaration base-type: ~S~% ~S~% ~S~%" base-type token is-decl)
-             (if is-decl
-                 (cond ((struct-type-p base-type)
-                        (read-struct base-type))
-                       ((enum-type-p base-type)
-                        (read-enum-decl)))
-                 (read-var-or-function-declaration base-type)))))))
+					;	     (format t "~&read-declaration base-type: ~S~% ~S~% ~S~%" base-type token is-decl)
+	     (if (char= (peek-char nil %in) #\()
+		 (read-c-exp (next-char))
+		 (if is-decl
+		     (cond ((struct-type-p base-type)
+			    (read-struct base-type))
+			   ((enum-type-p base-type)
+			    (read-enum-decl)))
+		     (read-var-or-function-declaration base-type))))))))
 
 (defun read-labeled-statement (token)
   (when (eql #\: (peek-char t %in))
@@ -1875,9 +1881,9 @@
     (#\# (read-c-macro %in c))
     (#\; (values))
     (t
-  ;   (print (file-position %in))
+;     (print "a")
      (let ((wot (read-c-exp c)))
-  ;     (print (file-position %in))
+;       (print "b")
        (%read-c-statement wot)))))
 
 (defun read-c-identifier (c)
@@ -1927,10 +1933,7 @@
    :elements (map 'list #'parse-infix (c-read-delimited-list #\{ #\,))))
 
 (defun read-c-exp (c)
- ; (print c)
- ; (print (file-position %in))
   (or (match-longest-op c)
-      ;(progn (print (file-position %in)))
       (cond ((digit-char-p c) (read-c-number c))
 	    ((or (eql c #\_)
 		 (alpha-char-p c))
@@ -1941,6 +1944,7 @@
 		 (setq symbol '__c_t))
 ;	       (print %in)
 	       (acond
+		 #+nil
 		 ((gethash symbol (compiler-state-pp *compiler-state*))
 		  ;;(describe it)
 		  #+nil
@@ -1959,6 +1963,7 @@
 		  (let ((a-char (next-char)))
 	;	    (print a-char)
 		    (read-c-exp a-char)))
+		 #+nil
 		 ((gethash symbol (compiler-state-enums *compiler-state*))
 		  ;;(dbg "returning it...~%")
 		  it)
@@ -1968,7 +1973,8 @@
 	     (case c
 	       (#\" (read-c-string %in c))
 	       (#\' (read-character-constant %in c))
-	       (#\( (read-exps-until (lambda (c) (eql #\) c))))
+	       (#\( (read-exps-until (lambda (c) (eql #\)
+						      c))))
 	       (#\{ (read-vector-literal)) ;; decl only
 	       (#\[ (list 'vacietis.c:[]
 			  (read-exps-until (lambda (c) (eql #\] c))))))))))
@@ -1976,7 +1982,6 @@
 ;;; readtable
 
 (defun read-c-toplevel (%in c)
-  (print 12312312)
   (let* ((*macro-stream* nil)
          (exp1           (read-c-statement c)))
     ;;(dbg "toplevel: ~S~%" exp1)

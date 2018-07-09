@@ -4,7 +4,7 @@
 (in-package #:vacietis.c)
 
 (cl:defparameter vacietis::*basic-c-types*
-  #(int void short long float double char))
+  #(int void short long float double char signed unsigned))
 
 (cl:defparameter vacietis::*unsigned-basic-c-types*
   #(unsigned-int unsigned-short unsigned-long unsigned-char))
