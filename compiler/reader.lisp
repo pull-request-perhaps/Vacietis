@@ -980,9 +980,11 @@
         local-arglist-lisp-type-declarations
         (*function-name* name)
         (*local-var-types* (make-hash-table))
-        (*local-variables* (make-hash-table)))
+        (*local-variables* (make-hash-table))
+
+	(parameters (c-read-delimited-list (next-char) #\,)))
     (block done-arglist
-      (loop for param across (c-read-delimited-list (next-char) #\,) do
+      (loop for param across parameters do
            (block done-arg
              (let ((ptrlev 0)
                    (arg-name)
@@ -1080,7 +1082,16 @@
                  (push (lisp-type-declaration-for arg-type arg-name)
                        arglist-type-declarations))))))
     (if (eql (peek-char nil %in) #\;)
-        (prog1 t (c-read-char)) ;; forward declaration
+        (prog1 ;t
+	    parameters
+	  #+nil
+	    (list arglist
+		  arglist-type-declarations
+		  local-arglist-declarations
+		  local-arglist-lisp-type-declarations
+		  *local-var-types*
+		  *local-variables*)
+	  (c-read-char)) ;; forward declaration
         (let ((ftype `(ftype (function ,(make-list (length arglist) :initial-element '*) ,(lisp-type-for result-type)) ,name)))
           (when (find '&rest arglist)
             (setq ftype nil))
@@ -1625,6 +1636,8 @@
 (defun read-var-or-function-declaration (base-type)
   "Reads a variable(s) or function declaration"
   (dbg "read-var-or-function-declaration: ~S~%" base-type)
+ ; (format t "~&read-var-or-function-declaration: ~S~%" base-type)
+  
   (let ((type base-type)
         name
         (spec-so-far (make-buffer)))
@@ -1642,7 +1655,8 @@
     (let ((next (next-char)))
       (c-unread-char next)
       (if (and name (eql #\( next))
-          (read-function name type)
+          (let ((foo (read-function name type)))
+		 (list 'defun name type foo))
           (read-variable-declarations spec-so-far base-type)))))
 
 (defun read-enum-decl ()
@@ -1674,13 +1688,13 @@
      do
        (dbg "type qualifier token: ~S~%" token)
        (case token
-         ('vacietis.c:extern
+         (vacietis.c:extern
           (setq *is-extern* t))
-         ('vacietis.c:inline
+         (vacietis.c:inline
           (setq *is-inline* t))
-         ('vacietis.c:unsigned
+         (vacietis.c:unsigned
           (setq *is-unsigned* t))
-         ('vacietis.c:const
+         (vacietis.c:const
           (setq *is-const* t)))
        (setf token (next-exp)))
   (awhen (gethash token (compiler-state-typedefs *compiler-state*))
@@ -1700,6 +1714,8 @@
         ((or (basic-type? token) (c-type-p token))
          (values (modify-base-type token) nil))
         (t
+	 token
+	 #+nil
          (read-error "Unexpected parser error: unknown type ~A" token))))
 
 (defun read-struct-decl-body (struct-type)
@@ -1780,7 +1796,7 @@
                   (base-type (read-base-type (next-exp))))
              (read-typedef base-type)
 	     )))
-        ((c-type? token)
+        (t ;(c-type? token)
          (let* ((*is-inline* nil)
                 (*is-extern* nil)
                 (*is-const* nil)
@@ -1788,6 +1804,7 @@
            (multiple-value-bind (base-type is-decl)
                (read-base-type token)
              (dbg "read-declaration base-type: ~S~%" base-type)
+;	     (format t "~&read-declaration base-type: ~S~% ~S~% ~S~%" base-type token is-decl)
              (if is-decl
                  (cond ((struct-type-p base-type)
                         (read-struct base-type))
@@ -1810,10 +1827,15 @@
 
 (defun %read-c-statement (token)
   (multiple-value-bind (statement label) (read-labeled-statement token)
-    (acond (label                    (values statement label))
-           ((read-declaration token) (if (eq t it) (values) it))
-           (t                        (or (read-control-flow-statement token)
-                                         (read-infix-exp token))))))
+    (if label
+	(values statement label)
+	(let ((foobar (read-declaration token)))
+	  (if foobar
+	      (if (eq t foobar)
+		  (values)
+		  foobar)
+	      (or (read-control-flow-statement token)
+		  (read-infix-exp token)))))))
 
 (defun read-c-statement (c)
   (case c
