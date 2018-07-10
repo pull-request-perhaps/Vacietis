@@ -775,7 +775,10 @@
           (let ((foo (read-function name type)))
 	    (list* 'defcfun (list (send-to-package name)
 				  (string name))
-		   type (coerce foo 'list)))
+		   type
+		   (delete-if (lambda (x)
+				(eq (car x) 'vacietis.c::void))
+			      (coerce foo 'list))))
           (read-variable-declarations spec-so-far base-type)))))
 
 (defun read-enum-decl ()
@@ -1153,7 +1156,7 @@
                   raw-name)))
     ;;(dbg "identifier-name: ~S~%" identifier-name)
     (let ((symbol (or (find-symbol identifier-name '#:vacietis.c)
-                      (intern identifier-name)
+                      (intern identifier-name *package*)
                       ;;(intern (string-upcase identifier-name))
                       )))
       (cond
@@ -1244,6 +1247,9 @@
 	   x)
       (funcall *fun* x)))
 
+(defun should-dump (value)
+  (and (not (or (symbolp value)
+		(equal value '(nil))))))
 
 (defun wow (*c-file* &optional (*compiler-state* (make-compiler-state)))
   (let ((*readtable*   c-readtable)
@@ -1251,7 +1257,8 @@
     (format t "~&~%;;;;~a~%~%" (pathname-name *c-file*))
     (with-open-file (stream *c-file*)
       (let ((%in stream))
-	(let ((eof (list nil)))
+	(let ((eof (list nil))
+	      (*package* (find-package :vacietis)))
 	  (let* ((package
 		  (find-package "VACIETIS.C"))
 		 (*fun* (lambda (x)
@@ -1268,8 +1275,9 @@
 		     (let ((*readtable* (find-readtable :standard))
 			   (*print-case* :downcase))
 		       (let ((value (treeify value)))
-			 (format t
-				 "~&~s~%" value)))
+			 (when (should-dump value)
+			   (format t
+				   "~&~s~%" value))))
 		     )))))))))
 
 (defparameter *directory*
