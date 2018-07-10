@@ -14,7 +14,8 @@
     signed unsigned
     extern auto register
     long short
-    float double int char *))
+    float double int char
+    void *))
 
 (cl:defparameter vacietis::*ops*
   #(= += -= *= /= %= <<= >>= &= ^= |\|=| ? |:| |\|\|| && |\|| ^ & == != < > <= >= << >> ++ -- + - * / % ! ~ -> |.| |,|
@@ -366,7 +367,9 @@
                                         (pp-read-line)))))
               (include-file
                (slurp-while (lambda (c) (char/= c delimiter)))))
+	 (declare (ignore include-file))
          (next-char)
+	 #+nil
          (if (char= delimiter #\")
 	     (progn
 	       #+nil
@@ -1669,19 +1672,24 @@
         name
         (spec-so-far (make-buffer)))
     (loop for c = (next-char) do
-         (cond ((eql c #\*)
-                (setf type        (make-pointer-to :type type))
-                (vector-push-extend 'vacietis.c:* spec-so-far))
-               ((or (eql c #\_) (alpha-char-p c))
-                (setf name (read-c-identifier c))
-                (vector-push-extend name spec-so-far)
-                (return))
-               (t
-                (c-unread-char c)
-                (return))))
- ;   (format t "~&~a" name)
+         (cond
+	   #+nil
+	   ((eql c #\*)
+	    (setf type (make-pointer-to :type type))
+	    (vector-push-extend 'vacietis.c:* spec-so-far))
+	   ((or (eql c #\_)
+		(alpha-char-p c))
+	    (setf name (read-c-identifier c))
+	    (vector-push-extend name spec-so-far)
+	    (return))
+	   (t
+	    (c-unread-char c)
+	    (return))))
+;;;;					    (format t "~&~a" name)
+					;    (print (file-position %in))
     (let ((next (next-char)))
       (c-unread-char next)
+      ;;(print next)
       (if (and name (eql #\( next))
           (let ((foo (read-function name type)))
 		 (list 'defun type name foo))
@@ -1734,12 +1742,15 @@
 	    ((find 'vacietis.c:double tokens)
 	     'vacietis.c:double)
 	    (t
-;	     (format t  "~&tok:~s" (car tokens))
-	     (car tokens)))
+					;	     (format t  "~&tok:~s" (car tokens))
+	     (car (remove 'vacietis.c:* tokens))))
+ ;   #+nil
     (let ((derefs (count 'vacietis.c:* tokens)))
+  ;    #+nil
       (dotimes (x derefs)
-	(setf token (list :pointer token)))
-      token))) ;;only one token so use it
+	(setf token (list :pointer token))))
+    token
+    )) ;;only one token so use it
 
 
 
@@ -1747,13 +1758,19 @@
   (dbg "read-base-type: ~S~%" token)
   (let ((tokens (list token))
 	(back-up nil))
-    (loop while (type-qualifier? token)
-      	 ;;(char= #\( (peek-char nil %in)) ;;;went too far
+    (loop while
+	 ;(type-qualifier? token)
+	 (not (let ((next-char (peek-char t %in)))
+;		(print next-char)
+		(or (char= #\( next-char)
+		    (char= #\; next-char)
+		    (char= #\{ next-char)))) ;;;went too far
        do
 	 (dbg "type qualifier token: ~S~%" token)
 	 (setf back-up (file-position %in))
 	 (setf token (next-exp))
 	 (push token tokens))
+    (pop tokens)
     (map nil
 	 (lambda (token)
 	   (case token
@@ -1766,7 +1783,7 @@
 	     (vacietis.c:unsigned
 	      (setq *is-unsigned* t))))
 	 tokens)
- ;   (format t "~&tokens ~s" token)
+ ;;   (format t "~&tokens ~s" tokens)
     (file-position %in back-up)
     #+nil
     (awhen (gethash token (compiler-state-typedefs *compiler-state*))
@@ -1868,48 +1885,52 @@
 		(*is-extern* nil)
 		(*is-const* nil)
 		(*is-unsigned* nil))
-	   (multiple-value-bind  (base-type is-decl other-type)
-	       (read-base-type (next-exp))
-	     (declare (ignorable is-decl))
+;	   (print "yolo")
+	   (let ((next (next-exp)))
+;	     (print next)
+	     (multiple-value-bind  (base-type is-decl other-type)
+		 (read-base-type next)
+	       (declare (ignorable is-decl))
+;;	       (print "baggins")
 	       ;;;read-typedef
-	     (dbg "read-typedef: ~S~%" base-type)
-	     (cond ((eq 'struct other-type) ;;;(struct-type-p base-type)
-		    (let ((names (read-struct base-type t)))
-		      (dbg "typedef read-struct names: ~S~%" names)
-		      #+nil
-		      (dolist (name names)
-			(when (symbolp name) ;; XXX handle pointer and array typedefs
-			  (setf (gethash name (compiler-state-typedefs *compiler-state*)) base-type)))
-		      (list 'struct
-			    names
-			    base-type)
-					;t
-		      ))
-		   ;;new
-		   ((eq 'enum other-type)
-		    (list
-		     'enum-???
-		     (c-read-delimited-list #\; #\,)
-		     base-type
-		     ))
-		   (t
-		    (let* ((token (next-exp))
-			   ;(wot)
-			   )
-		      (read-infix-exp token)
-					;	   (print wot)
-		      (list
-		       'typedef
-		       token
-		       base-type)
-		      #+nil
-		      (multiple-value-bind (name type)
-			  (process-variable-declaration wot base-type)
-			(declare (ignorable name type))
+	       (dbg "read-typedef: ~S~%" base-type)
+	       (cond ((eq 'struct other-type) ;;;(struct-type-p base-type)
+		      (let ((names (read-struct base-type t)))
+			(dbg "typedef read-struct names: ~S~%" names)
 			#+nil
-			(setf (gethash name (compiler-state-typedefs *compiler-state*)) type)
+			(dolist (name names)
+			  (when (symbolp name) ;; XXX handle pointer and array typedefs
+			    (setf (gethash name (compiler-state-typedefs *compiler-state*)) base-type)))
+			(list 'struct
+			      names
+			      base-type)
 					;t
-			))))))
+			))
+		     ;;new
+		     ((eq 'enum other-type)
+		      (list
+		       'enum-???
+		       (c-read-delimited-list #\; #\,)
+		       base-type
+		       ))
+		     (t
+		      (let* ((token (next-exp))
+					;(wot)
+			     )
+			(read-infix-exp token)
+					;	   (print wot)
+			(list
+			 'typedef
+			 token
+			 base-type)
+			#+nil
+			(multiple-value-bind (name type)
+			    (process-variable-declaration wot base-type)
+			  (declare (ignorable name type))
+			  #+nil
+			  (setf (gethash name (compiler-state-typedefs *compiler-state*)) type)
+					;t
+			  )))))))
      )
     (t ;(c-type? token)
      (let ((typedef?
@@ -1944,7 +1965,10 @@
 			  (read-struct base-type))
 			 ((enum-type-p base-type)
 			  (read-enum-decl)))
-		   (read-var-or-function-declaration base-type)))))))))
+		   (progn
+		     ;;		     (print "fuckme")
+;		     (print base-type)
+		     (read-var-or-function-declaration base-type))))))))))
 
 (defun read-labeled-statement (token)
   (when (eql #\: (peek-char t %in))
@@ -1963,13 +1987,16 @@
   (multiple-value-bind (statement label) (read-labeled-statement token)
     (if label
 	(values statement label)
-	(let ((foobar (read-declaration token)))
-	  (if foobar
-	      (if (eq t foobar)
-		  (values)
-		  foobar)
-	      (or (read-control-flow-statement token)
-		  (read-infix-exp token)))))))
+	(progn
+;	  (print "a fuck")
+	  (let ((foobar (read-declaration token)))
+;	    (print "fuck 7")
+	    (if foobar
+		(if (eq t foobar)
+		    (values)
+		    foobar)
+		(or (read-control-flow-statement token)
+		    (read-infix-exp token))))))))
 
 (defun read-c-statement (c)
 ;  (print (file-position %in))
