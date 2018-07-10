@@ -2187,3 +2187,19 @@
 		 (return)
 		 (format t "~&~s~&" value)
 		 )))))))
+
+(defparameter *directory*
+  "/home/imac/install/llvm/3.8.0/src/include/llvm-c/")
+(defparameter *directory-transforms*
+  (merge-pathnames "Transforms/" *directory*))
+(defun wot (&optional (directory *directory*))
+  (let ((*directory-transforms* (merge-pathnames "Transforms/" directory)))
+    (labels ((dump (file)
+	       (wow file))
+	     (stuff (files)
+	       (dolist (file files)
+		 (when (string= "h"
+				(pathname-type file))
+		   (dump file)))))
+      (stuff (uiop:directory-files directory))
+      (stuff (uiop:directory-files *directory-transforms*)))))
