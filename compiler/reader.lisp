@@ -2262,16 +2262,16 @@
 
 (defparameter *directory*
   (format nil
-	  "/home/imac/install/llvm/~A/src/include/llvm-c/"
+	  "/home/imac/install/llvm/~A/"
 	  ;#+nil
-	  "3.8.0"
+	  "3.8.0/"
 	  #+nil
-	  "6.0.0"
+	  "6.0.0/"
 	  ))
 (defparameter *directory-transforms*
   (merge-pathnames "Transforms/" *directory*))
 (defun wot (&optional (directory *directory*))
-  (let ((*directory-transforms* (merge-pathnames "Transforms/" directory)))
+  (let ((*directory-transforms* (merge-pathnames "src/include/llvm-c/Transforms/" directory)))
     (labels ((dump (file)
 	       (wow file))
 	     (stuff (files)

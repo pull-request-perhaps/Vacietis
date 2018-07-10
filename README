@@ -1,3 +1,12 @@
+
+This version has been modfied to parse c headers, specifically LLVM-c include files
+
+(vacietis::wot &optional PATH-TOO-LLVM-INSTALL)
+
+
+
+
+
 Vacietis is a C compiler for Common Lisp systems.
 
 Vacietis works by loading C code into a Common Lisp runtime as though
