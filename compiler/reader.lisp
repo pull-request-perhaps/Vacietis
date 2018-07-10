@@ -2271,16 +2271,17 @@
 (defparameter *directory-transforms*
   (merge-pathnames "Transforms/" *directory*))
 (defun wot (&optional (directory *directory*))
-  (let ((*directory-transforms* (merge-pathnames "src/include/llvm-c/Transforms/" directory)))
-    (labels ((dump (file)
-	       (wow file))
-	     (stuff (files)
-	       (dolist (file files)
-		 (when (string= "h"
-				(pathname-type file))
-		   (dump file)))))
-      (stuff (uiop:directory-files directory))
-      (stuff (uiop:directory-files *directory-transforms*)))))
+  (let ((c-include-files-dir (merge-pathnames "src/include/llvm-c/" directory)))
+    (let ((*directory-transforms* (merge-pathnames "Transforms/" c-include-files-dir)))
+      (labels ((dump (file)
+		 (wow file))
+	       (stuff (files)
+		 (dolist (file files)
+		   (when (string= "h"
+				  (pathname-type file))
+		     (dump file)))))
+	(stuff (uiop:directory-files c-include-files-dir))
+	(stuff (uiop:directory-files *directory-transforms*))))))
 
 (defun treeify (x)
   (if (typep x 'sequence)
