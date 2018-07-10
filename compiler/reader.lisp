@@ -1134,21 +1134,23 @@
           (setf (gethash name (compiler-state-functions *compiler-state*))
                 (make-c-function :return-type result-type
                                  :inline *is-inline*))
-          `(progn
-             ,@(when *is-inline* (list `(declaim (inline ,name))))
-             ,@(when ftype (list `(declaim ,ftype)))
-             (vac-defun/1 ,name ,arglist
-			  (declare ,@(remove-if #'null arglist-type-declarations))
-			  ,(let* ((*variable-declarations* ())
-				  (*variable-lisp-type-declarations* ())
-				  (body (read-c-block (next-char))))
-				 `(prog* ,(append
-					   local-arglist-declarations
-					   (nreverse *variable-declarations*))
-				     (declare
-				      ,@(remove-if #'null local-arglist-lisp-type-declarations)
-				      ,@(remove-if #'null *variable-lisp-type-declarations*))
-				     ,@body))))))))
+	  parameters
+	  #+nil
+	  (let ((body (read-c-block (next-char))))
+	    `(progn
+	       ,@(when *is-inline* (list `(declaim (inline ,name))))
+	       ,@(when ftype (list `(declaim ,ftype)))
+	       (vac-defun/1 ,name ,arglist
+			    (declare ,@(remove-if #'null arglist-type-declarations))
+			    ,(let* ((*variable-declarations* ())
+				    (*variable-lisp-type-declarations* ()))
+				   `(prog* ,(append
+					     local-arglist-declarations
+					     (nreverse *variable-declarations*))
+				       (declare
+					,@(remove-if #'null local-arglist-lisp-type-declarations)
+					,@(remove-if #'null *variable-lisp-type-declarations*))
+				       ,@body)))))))))
 #+nil
 (defun one-long-progn (body)
   (loop for x in body
@@ -1809,7 +1811,7 @@
 					;	     (print token)
 					;	     (print name)
 	     (values
-	      (list name tokens)
+	      name
 	      t
 	      'enum)
 					;	     (values (make-enum-type :name huh) t)
@@ -1957,7 +1959,8 @@
 	;;	  (print "@@#${}$@}@#${")
 		  (let* ((token (next-exp))
 			 )
-		    (print (next-exp))
+		    ;;;;;;;FIXME:: multiple typedef names
+;;		    (print (next-exp))
 ;;		    (print 2342342)
 	;	    (read-infix-exp token)
 					;	   (print wot)
@@ -2099,10 +2102,12 @@
   elements)
 
 (defun read-vector-literal ()
+  #+nil
   (make-vector-literal
    :elements ;(map 'list #'parse-infix)
-   (c-read-delimited-list #\{ #\,)
-		  ))
+)
+  (c-read-delimited-list #\{ #\,)
+		  )
 
 (defun read-c-exp (c)
   (or (match-longest-op c)
@@ -2202,6 +2207,7 @@
 
 ;;; reader
 
+#+nil
 (defun cstr (str)
   (dbg "cstr: ~S~%" str)
   (with-input-from-string (s str)
@@ -2211,6 +2217,7 @@
                                   while (not (eq it 'eof)) collect it))))
         (eval `(vac-progn/1 ,body))))))
 
+#+nil
 (defun cstr-noeval (str)
   (with-input-from-string (s str)
     (let ((*compiler-state* (make-compiler-state))
@@ -2219,18 +2226,20 @@
                                   while (not (eq it 'eof)) collect it))))
         body))))
 
+#+nil
 (defun %load-c-file (*c-file* *compiler-state*)
   (let ((*readtable*   c-readtable)
         (*line-number* 1))
     (load *c-file*)))
 
+#+nil
 (defun load-c-file (file)
   (%load-c-file file (make-compiler-state)))
 
 (defun wow (*c-file* &optional (*compiler-state* (make-compiler-state)))
   (let ((*readtable*   c-readtable)
         (*line-number* 1))
-    (format t "~&~%~a~%~%" (pathname-name *c-file*))
+   (format t "~&~%~a~%~%" (pathname-name *c-file*))
     (with-open-file (stream *c-file*)
       (let ((%in stream))
 	(let ((eof (list nil)))
@@ -2242,19 +2251,21 @@
 		     ))
 	       (if (eq value eof)
 		   (return)
-		   (format t
-			   "~&~s~%"
-			   #+nil
-			   "~&here::: 
-   ~s~&~%" value)
+		   (let ((value (treeify value)))
+		     (unless (symbolp value)
+		       (format t
+			       "~&::~s~%"
+			       #+nil
+			       "~&here::: 
+   ~s~&~%" value)))
 		   ))))))))
 
 (defparameter *directory*
   (format nil
 	  "/home/imac/install/llvm/~A/src/include/llvm-c/"
-	  #+nil
-	  "3.8.0"
 	  ;#+nil
+	  "3.8.0"
+	  #+nil
 	  "6.0.0"
 	  ))
 (defparameter *directory-transforms*
@@ -2270,3 +2281,9 @@
 		   (dump file)))))
       (stuff (uiop:directory-files directory))
       (stuff (uiop:directory-files *directory-transforms*)))))
+
+(defun treeify (x)
+  (if (typep x 'sequence)
+      (map 'list #'treeify
+	   x)
+      x))
