@@ -740,9 +740,10 @@
 	       new)))
       (cond ((prefix? "LLVM" string)
 	     (send :llvm 4))
+	    #+nil
 	    ((prefix? "LTO_" string)
 	     (send :lto 4))
-	    (t (intern name :vacietis))))))
+	    (t (intern (string name) :vacietis))))))
 
 (defun read-var-or-function-declaration (base-type)
   "Reads a variable(s) or function declaration"
@@ -1141,9 +1142,11 @@
                     (slurp-while (lambda (c)
                                    (or (eql c #\_)
 				       (alphanumericp c))))))
-         (raw-name-alphas (remove-if-not #'alpha-char-p raw-name))
+        (raw-name-alphas (remove-if-not #'alpha-char-p raw-name))
          (identifier-name
           (format nil
+;		  "~A"
+
                   (cond ((every #'upper-case-p raw-name-alphas) "~(~A~)")
                         ((every #'lower-case-p raw-name-alphas) "~:@(~A~)")
                         (t "~A"))
