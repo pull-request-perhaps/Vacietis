@@ -1,7 +1,7 @@
 (in-package #:vacietis)
 
 ;;(declaim (optimize (debug 3)))
-(declaim (optimize (speed 3) (debug 0) (safety 1)))
+(declaim (optimize (speed 0) (debug 3) (safety 1)))
 
 ;;(defparameter *optimize* '(optimize (speed 0) (debug 3) (safety 3)))
 ;;(defparameter *optimize* '(optimize (speed 3) (debug 0) (safety 1)))
@@ -564,8 +564,10 @@
 
 ;;; infix
 
+#+nil
 (defvar *variable-declarations-base-type*)
 
+#+nil
 (defun parse-infix (exp &optional (start 0) (end (when (vectorp exp) (length exp))) base-type)
   ;;(dbg "parse-infix: ~S ~S ~S~%" exp start end)
   (if (vectorp exp)
@@ -904,7 +906,7 @@
        using (hash-value value)
        do (setf (gethash key copy) value))
     copy))
-
+#+nil
 (defun read-control-flow-statement (statement)
   (flet ((read-block-or-statement ()
            (let ((next-char (next-char)))
@@ -1775,7 +1777,8 @@
 			     nil)))
 		  (or (test #\()
 		      (test #\;)
-		      (test #\{))))) ;;;went too far
+		      (test #\{)
+		      (test #\,))))) ;;;went too far
        do
 	 (dbg "type qualifier token: ~S~%" token)
 	 (setf back-up (file-position %in))
@@ -1880,7 +1883,8 @@
 ;  (print "lolz")
   )
 
-(defun read-c-identifier-list (c)
+(defun read-c-identifier-list (&optional c)
+  (declare (ignore c))
   (map 'list (lambda (v)
                (if (= 1 (length v))
                    (aref v 0)
@@ -1910,14 +1914,6 @@
              (read-variable-declarations (vector (read-c-exp it))
                                          struct-type)))))
 
-(defun read-infix-exp (next-token)
-  (let ((exp (make-buffer)))
-    (vector-push-extend next-token exp)
-    (loop for c = (next-char nil)
-       until (or (eql c #\;) (null c))
-       do (vector-push-extend (read-c-exp c) exp))
-    (parse-infix exp)))
-
 
 (defun read-declaration (token)
   (cond
@@ -1938,7 +1934,7 @@
 	   (dbg "read-typedef: ~S~%" base-type)
 	   (cond ((eq 'struct other-type) ;;;(struct-type-p base-type)
 		  (let ((names (read-struct base-type t)))
-		   ;;;;(print "@#$@#$@#$@")
+;;		   (print "@#$@#$@#$@")
 		    (dbg "typedef read-struct names: ~S~%" names)
 		    #+nil
 		    (dolist (name names)
@@ -1958,10 +1954,12 @@
 		   base-type
 		   ))
 		 (t
+	;;	  (print "@@#${}$@}@#${")
 		  (let* ((token (next-exp))
-					;(wot)
 			 )
-		    (read-infix-exp token)
+		    (print (next-exp))
+;;		    (print 2342342)
+	;	    (read-infix-exp token)
 					;	   (print wot)
 		    (list
 		     'typedef
@@ -1974,8 +1972,7 @@
 		      #+nil
 		      (setf (gethash name (compiler-state-typedefs *compiler-state*)) type)
 					;t
-		      )))))))
-     )
+		      ))))))))
     (t ;(c-type? token)
      (let ((typedef?
 	    (eq 'vacietis.c:typedef token)))
@@ -2020,12 +2017,15 @@
     (next-char)
     (values (read-c-statement (next-char)) token)))
 
+;#+nil
 (defun read-infix-exp (next-token)
   (let ((exp (make-buffer)))
     (vector-push-extend next-token exp)
     (loop for c = (next-char nil)
        until (or (eql c #\;) (null c))
        do (vector-push-extend (read-c-exp c) exp))
+    exp
+    #+nil
     (parse-infix exp)))
 
 (defun %read-c-statement (token)
@@ -2100,19 +2100,24 @@
 
 (defun read-vector-literal ()
   (make-vector-literal
-   :elements (map 'list #'parse-infix (c-read-delimited-list #\{ #\,))))
+   :elements ;(map 'list #'parse-infix)
+   (c-read-delimited-list #\{ #\,)
+		  ))
 
 (defun read-c-exp (c)
   (or (match-longest-op c)
-      (cond ((digit-char-p c) (read-c-number c))
+      (cond ((digit-char-p c)
+	     (read-c-number c))
 	    ((or (eql c #\_)
 		 (alpha-char-p c))
 	     (let ((symbol (read-c-identifier c)))
+	       symbol
 	       ;;(dbg "~S -> symbol: ~S~%" c symbol)
 	       #+nil
 	       (when (eq t symbol)
 		 (setq symbol '__c_t))
 					;	       (print %in)
+	       #+nil
 	       (acond
 		 #+nil
 		 ((gethash symbol (compiler-state-pp *compiler-state*))
@@ -2152,9 +2157,11 @@
 ;;; readtable
 
 (defun read-c-toplevel (%in c)
-  (let* ((*macro-stream* nil)
+  (let* (;(*macro-stream* nil)
          (exp1           (read-c-statement c)))
     ;;(dbg "toplevel: ~S~%" exp1)
+    exp1
+    #+nil
     (if (and *macro-stream* (peek-char t *macro-stream* nil))
         (list* 'progn
                exp1
@@ -2225,18 +2232,22 @@
         (*line-number* 1))
     (format t "~&~%~a~%~%" (pathname-name *c-file*))
     (with-open-file (stream *c-file*)
-      (let ((eof (list nil)))
-	(loop
-	   (let ((value
-		  (read stream nil eof)))
-	     (if (eq value eof)
-		 (return)
-		 (format t
-			 "~&~s~%"
-			 #+nil
-			 "~&here::: 
+      (let ((%in stream))
+	(let ((eof (list nil)))
+	  (loop
+	     (let ((value		    
+;		    (next-exp)
+		     
+		     (read stream nil eof)
+		     ))
+	       (if (eq value eof)
+		   (return)
+		   (format t
+			   "~&~s~%"
+			   #+nil
+			   "~&here::: 
    ~s~&~%" value)
-		 )))))))
+		   ))))))))
 
 (defparameter *directory*
   (format nil
