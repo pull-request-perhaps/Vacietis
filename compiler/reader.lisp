@@ -1147,7 +1147,7 @@
 				      ,@(remove-if #'null local-arglist-lisp-type-declarations)
 				      ,@(remove-if #'null *variable-lisp-type-declarations*))
 				     ,@body))))))))
-
+#+nil
 (defun one-long-progn (body)
   (loop for x in body
      nconc (cond
@@ -1155,7 +1155,7 @@
               (one-long-progn (cdr x)))
              (t
               (list x)))))
-
+#+nil
 (defun get-alien-value-types (type)
   (cond
     ((array-type-p type)
@@ -1178,7 +1178,7 @@
       type))
     (t
      type)))
-
+#+nil
 (defun set-alien-values (type alien next-value next-offset)
   (cond
     ((array-type-p type)
@@ -1377,6 +1377,7 @@
 		   ,(one-long-progn (set-alien-values type sap #'next-value #'next-offset))))
                ,c-pointer))))))
 
+#+nil
 (defun to-struct-value (type value)
   (if *use-alien-types*
       (convert-to-alien-value type value)
@@ -1777,7 +1778,7 @@
 	 (setf back-up (file-position %in))
 	 (setf token (next-exp))
 	 (push token tokens))
-    (format t "~&tokens ~s" tokens)
+;    (format t "~&tokens ~s" tokens)
     (pop tokens)
     (map nil
 	 (lambda (token)
@@ -1836,22 +1837,39 @@
 	    nil)))))
 
 (defun read-struct-decl-body (struct-type)
-  (let ((slot-index 0)
-        (*in-struct* t))
+  (declare (ignore struct-type))
+;  (print 24234234234)
+  (let (;(slot-index 0)
+        (*in-struct* t)
+	acc)
     (loop for c = (next-char) until (eql #\} c) do
-         (multiple-value-bind (slot-name slot-type)
-             (let ((base-type (read-base-type (read-c-exp c))))
-               (process-variable-declaration (read-infix-exp (next-exp))
-                                             base-type))
-           (dbg "struct-type: ~S slot-name ~A i: ~D~%" struct-type slot-name slot-index)
-           (setf (gethash (format nil "~A.~A" (slot-value struct-type 'name) slot-name)
-                          (compiler-state-accessors *compiler-state*))
-                 (if *use-alien-types* slot-name slot-index)
-                 (struct-type-slot-names struct-type)
-                 (append (struct-type-slot-names struct-type) (list slot-name))
-                 (struct-type-slots struct-type)
-                 (append (struct-type-slots struct-type) (list slot-type)))
-           (incf slot-index)))))
+;	 (print c)
+	 (let ((exp (read-c-exp c)))
+	   (let ((base-type (read-base-type exp)))
+	     (let ((next (next-exp)))
+	       (let ((infix (read-infix-exp next)))
+		 (prog1 (push (list base-type infix) acc)
+		   (when next
+
+		     #+nil
+		     (multiple-value-bind (slot-name slot-type)
+			 (process-variable-declaration infix
+						       base-type)
+		       (dbg "struct-type: ~S slot-name ~A i: ~D~%" struct-type slot-name slot-index)
+					;    #+nil
+		       (setf (gethash (format nil "~A.~A" (slot-value struct-type 'name) slot-name)
+				      (compiler-state-accessors *compiler-state*))
+			     (if *use-alien-types* slot-name slot-index)
+			     (struct-type-slot-names struct-type)
+			     (append (struct-type-slot-names struct-type)
+				     (list slot-name))
+			     (struct-type-slots struct-type)
+			     (append (struct-type-slots struct-type)
+				     (list slot-type)))
+		       (incf slot-index)))))))))
+    acc)
+;  (print "lolz")
+  )
 
 (defun read-c-identifier-list (c)
   (map 'list (lambda (v)
@@ -1862,18 +1880,19 @@
 
 (defun read-struct (struct-type &optional for-typedef)
   (acase (next-char)
-    (#\{ (read-struct-decl-body struct-type)
-	 #+nil
-         (awhen (struct-type-name struct-type)
-           (setf (gethash it (compiler-state-structs *compiler-state*))
-                 struct-type))
-         (let ((c (next-char)))
-           (if (eql #\; c)
-               t
-               (progn (c-unread-char c)
-                      (if for-typedef
-                          (read-c-identifier-list c)
-                          (read-variable-declarations #() struct-type))))))
+    (#\{ (let ((body (read-struct-decl-body struct-type)))
+	   #+nil
+	   (awhen (struct-type-name struct-type)
+	     (setf (gethash it (compiler-state-structs *compiler-state*))
+		   struct-type))
+	   (list body
+		 (let ((c (next-char)))
+		   (if (eql #\; c)
+		       t
+		       (progn (c-unread-char c)
+			      (if for-typedef
+				  (read-c-identifier-list c)
+				  (read-variable-declarations #() struct-type))))))))
     (#\; t) ;; forward declaration
     (t   (if for-typedef
              (progn (c-unread-char it)
@@ -1959,7 +1978,7 @@
 	      (if typedef?
 		  (next-exp)
 		  token))
-	   (print (list base-type is-decl other-type))
+;;	   (print (list base-type is-decl other-type))
 	   (dbg "read-declaration base-type: ~S~%" base-type)
 	   ;;	   (format t "~&read-declaration base-type: ~S~% ~S~% ~S~%" base-type token is-decl)
 	   (if (char= (peek-char nil %in) #\()
@@ -2201,7 +2220,11 @@
 		  (read stream nil eof)))
 	     (if (eq value eof)
 		 (return)
-		 (format t "~&~s~&" value)
+		 (format t
+			 "~&~s~%"
+			 #+nil
+			 "~&here::: 
+   ~s~&~%" value)
 		 )))))))
 
 (defparameter *directory*
