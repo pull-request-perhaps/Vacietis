@@ -469,6 +469,8 @@
     list))
 
 (defvar *function-name*)
+(defvar *local-var-types*)
+(defvar *local-variables*)
 
 (defun read-function (name result-type)
   (let (arglist
