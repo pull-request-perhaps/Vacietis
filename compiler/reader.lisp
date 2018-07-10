@@ -171,15 +171,15 @@
   (labels ((digit-value (c) (- (char-code c) 48)))
     (let ((value (digit-value c0)))
       (loop-reading
-           (cond ((null c)
-                  (return value))
-                 ((char<= #\0 c #\9)
-                  (setf value (+ (* 10 value) (digit-value c))))
-                 ((or (char-equal c #\E) (char= c #\.))
-                  (return (read-float value c)))
-                 (t
-                  (c-unread-char c)
-                  (return value)))))))
+	 (cond ((null c)
+		(return value))
+	       ((char<= #\0 c #\9)
+		(setf value (+ (* 10 value) (digit-value c))))
+	       ((or (char-equal c #\E) (char= c #\.))
+		(return (read-float value c)))
+	       (t
+		(c-unread-char c)
+		(return value)))))))
 
 (defun read-c-number (c)
   (prog1 (if (char= c #\0)
@@ -236,23 +236,23 @@
 (defun pp-read-line ()
   (let (comment-follows?
 	(escaped-newline? nil))
-   (prog1
-       (slurp-while (lambda (c)
-		      (case c
-			(#\\
-			 (setf escaped-newline? t) t)
-			(#\Newline escaped-newline?)
-			(#\/
-			 (setf escaped-newline? nil) 
-			 (if (find (peek-char nil %in nil nil) "/*")
-				 (progn (setf comment-follows? t) nil)
-				 t))
-			(t
-			 (setf escaped-newline? nil) 
-			 t))))
-     (c-read-char)
-     (when comment-follows?
-       (%maybe-read-comment)))))
+    (prog1
+	(slurp-while (lambda (c)
+		       (case c
+			 (#\\
+			  (setf escaped-newline? t) t)
+			 (#\Newline escaped-newline?)
+			 (#\/
+			  (setf escaped-newline? nil) 
+			  (if (find (peek-char nil %in nil nil) "/*")
+			      (progn (setf comment-follows? t) nil)
+			      t))
+			 (t
+			  (setf escaped-newline? nil) 
+			  t))))
+      (c-read-char)
+      (when comment-follows?
+	(%maybe-read-comment)))))
 
 (symbol-macrolet ((body (gethash def
 				 (compiler-state-pp *compiler-state*))))
@@ -302,7 +302,7 @@
 			       (compiler-state-pp *compiler-state*))
 		      x)
 	      ,exp)))
- ;     (print wtf)
+					;     (print wtf)
       (eval wtf))))
 
 (defun fill-in-template (args template subs)
@@ -323,38 +323,38 @@
         (acc (make-buffer)))
     (with-output-to-string (sink)
       (loop for c = (c-read-char)
-            until (and (= paren-depth 0) (eql #\) c)) do
-            (case c
-              (#\Space (unless skip-spaces? (princ c sink)))
-              (#\( (incf paren-depth) (princ c sink))
-              (#\) (decf paren-depth) (princ c sink))
-              (#\, (vector-push-extend (get-output-stream-string sink) acc))
-              (otherwise (princ c sink)))
-            finally (let ((last (get-output-stream-string sink)))
-                      (unless (string= last "")
-                        (vector-push-extend last acc)))))
+	 until (and (= paren-depth 0) (eql #\) c)) do
+	   (case c
+	     (#\Space (unless skip-spaces? (princ c sink)))
+	     (#\( (incf paren-depth) (princ c sink))
+	     (#\) (decf paren-depth) (princ c sink))
+	     (#\, (vector-push-extend (get-output-stream-string sink) acc))
+	     (otherwise (princ c sink)))
+	 finally (let ((last (get-output-stream-string sink)))
+		   (unless (string= last "")
+		     (vector-push-extend last acc)))))
     (map 'list #'identity acc)))
 
 (defun read-c-macro (%in sharp)
   (declare (ignore sharp))
   ;; preprocessor directives need to be read in a separate namespace
   (let ((pp-directive (read-c-identifier (next-char))))
-    ;(format t "FUCKCKCKK ~a" pp-directive)
+					;(format t "FUCKCKCKK ~a" pp-directive)
     (case pp-directive
       (vacietis.c:define
        (setf (lookup-define)
 	     (let ((fuck1 (eql #\( (peek-char nil %in))))
-;	       (print fuck1)
+					;	       (print fuck1)
 	       (if  fuck1;; no space between identifier and left paren
-		   (let ((args     (c-read-delimited-strings t))
-			 (template (string-trim '(#\Space #\Tab) (pp-read-line))))
-;		     (print args)
-		     ;;(dbg "read left paren...~%")
-		     (lambda (substitutions)
-		       (if args
-			   (fill-in-template args template substitutions)
-			   template)))
-		   (pp-read-line)))))
+		    (let ((args     (c-read-delimited-strings t))
+			  (template (string-trim '(#\Space #\Tab) (pp-read-line))))
+					;		     (print args)
+		      ;;(dbg "read left paren...~%")
+		      (lambda (substitutions)
+			(if args
+			    (fill-in-template args template substitutions)
+			    template)))
+		    (pp-read-line)))))
       (vacietis.c:undef
        (remhash (read-c-identifier (next-char))
                 (compiler-state-pp *compiler-state*))
@@ -373,12 +373,12 @@
          (if (char= delimiter #\")
 	     (progn
 	       #+nil
-	      (%load-c-file (merge-pathnames
-			     include-file
-			     (directory-namestring
-			      (or *load-truename* *compile-file-truename*
-				  *default-pathname-defaults*)))
-			    *compiler-state*))
+	       (%load-c-file (merge-pathnames
+			      include-file
+			      (directory-namestring
+			       (or *load-truename* *compile-file-truename*
+				   *default-pathname-defaults*)))
+			     *compiler-state*))
              (include-libc-file include-file))))
       (vacietis.c:if
        (push 'if preprocessor-if-stack)
@@ -710,7 +710,7 @@
                    ;;(dbg "parse-rest: i: ~S  end: ~S~%" i end)
                    (parse-infix exp (1+ i) end)))
             (loop for i from start below end for x = (aref exp i) do
-                 ;;(dbg "unary? ~S~%" x)
+	       ;;(dbg "unary? ~S~%" x)
                  (cond ((cast? x)                               ;; cast
                         ;;(dbg "cast: x: ~S~%" x)
                         (return-from parse-infix (parse-rest i)))
@@ -820,20 +820,20 @@
                   (dbg "funcall: ~S~%" x)
                   (return-from parse-infix
                     (let ((fun-exp (parse-infix exp start i)))
-                     (append
-                      (cond
-                        ((symbolp fun-exp)
-                         (list fun-exp))
-                        ((and (listp fun-exp)
-                              (eql 'fdefinition (car fun-exp)))
-                         (list (cadr (cadr fun-exp))))
-                        (t
-                         (list 'funcall fun-exp)))
-                      (loop with xstart = 0
-                            for next = (position 'vacietis.c:|,| x :start xstart)
-                            when (< 0 (length x))
-                              collect (parse-infix x xstart (or next (length x)))
-			 while next do (setf xstart (1+ next)))))))))
+		      (append
+		       (cond
+			 ((symbolp fun-exp)
+			  (list fun-exp))
+			 ((and (listp fun-exp)
+			       (eql 'fdefinition (car fun-exp)))
+			  (list (cadr (cadr fun-exp))))
+			 (t
+			  (list 'funcall fun-exp)))
+		       (loop with xstart = 0
+			  for next = (position 'vacietis.c:|,| x :start xstart)
+			  when (< 0 (length x))
+			  collect (parse-infix x xstart (or next (length x)))
+			  while next do (setf xstart (1+ next)))))))))
 	  (return-from parse-infix "nope")
 	  #+nil
           (read-error "Error parsing expression: ~A"
@@ -854,9 +854,9 @@
 (defun read-c-block (c)
   (if (eql c #\{)
       (loop for c = (next-char)
-            until (eql c #\}) append (reverse
-                                      (multiple-value-list
-                                       (read-c-statement c))))
+	 until (eql c #\}) append (reverse
+				   (multiple-value-list
+				    (read-c-statement c))))
       (read-error "Expected opening brace '{' but found '~A'" c)))
 
 (defun next-exp ()
@@ -869,7 +869,7 @@
 (defun read-exps-until (predicate)
   (let ((exps (make-buffer)))
     (loop for c = (next-char)
-          until (funcall predicate c)
+       until (funcall predicate c)
        do (progn
             ;;(dbg "read c: ~S~%" c)
             (vector-push-extend (read-c-exp c) exps)))
@@ -931,9 +931,9 @@
                                              (read-block-or-statement))))))
                             ((integer-type? test-type)
                              `(if (not (eql 0 ,test))
-                                    ,then
-                                    ,(when (eq next-token 'vacietis.c:else)
-                                           (read-block-or-statement))))
+				  ,then
+				  ,(when (eq next-token 'vacietis.c:else)
+					 (read-block-or-statement))))
                             (t `(if ,test
                                     ,then
                                     ,(when (eq next-token 'vacietis.c:else)
@@ -949,22 +949,22 @@
               `(progn ,if-exp ,(%read-c-statement next-token))))
         (case statement
           ((vacietis.c:break vacietis.c:continue)
-            `(go ,statement))
+	   `(go ,statement))
           (vacietis.c:goto
-            `(go ,(read-c-statement (next-char))))
+	   `(go ,(read-c-statement (next-char))))
           (vacietis.c:return
             `(return-from ,*function-name* ,(or (read-c-statement (next-char)) 0)))
           (vacietis.c:case
-            (prog1 (car (push
-                         (eval (parse-infix (next-exp))) ;; must be constant int
-                         *cases*))
-              (unless (eql #\: (next-char))
-                (read-error "Error parsing case statement"))))
+	      (prog1 (car (push
+			   (eval (parse-infix (next-exp))) ;; must be constant int
+			   *cases*))
+		(unless (eql #\: (next-char))
+		  (read-error "Error parsing case statement"))))
           (vacietis.c:switch
-            (let* ((exp     (parse-infix (next-exp)))
-                   (*cases* ())
-                   (body    (read-c-block (next-char))))
-              `(vacietis.c:switch ,exp ,*cases* ,body)))
+	      (let* ((exp     (parse-infix (next-exp)))
+		     (*cases* ())
+		     (body    (read-c-block (next-char))))
+		`(vacietis.c:switch ,exp ,*cases* ,body)))
           (vacietis.c:while
            (let ((test (parse-infix (next-exp))))
              (dbg "while test type: ~S~%" (c-type-of-exp test))
@@ -979,29 +979,29 @@
            `(vacietis.c:for (nil nil ,(parse-infix (next-exp)) nil)
                             ,(read-block-or-statement)))
           (vacietis.c:do
-            (let ((body (read-block-or-statement)))
-              (if (eql (next-exp) 'vacietis.c:while)
-                  (let ((test (parse-infix (next-exp))))
-                    (prog1 `(vacietis.c:do ,body ,(if (integer-type? (c-type-of-exp test)) `(not (eql 0 ,test)) test))
-                      (read-c-statement (next-char)))) ;; semicolon
-                  (read-error "No 'while' following a 'do'"))))
+	   (let ((body (read-block-or-statement)))
+	     (if (eql (next-exp) 'vacietis.c:while)
+		 (let ((test (parse-infix (next-exp))))
+		   (prog1 `(vacietis.c:do ,body ,(if (integer-type? (c-type-of-exp test)) `(not (eql 0 ,test)) test))
+		     (read-c-statement (next-char)))) ;; semicolon
+		 (read-error "No 'while' following a 'do'"))))
           (vacietis.c:for
-            `(vacietis.c:for
-              ,(let* ((*local-var-types* (if *local-var-types*
-                                             (copy-hash-table *local-var-types*)
-                                             (make-hash-table)))
-                      (*variable-declarations* ()) ;; c99, I think?
-                      (*variable-lisp-type-declarations* ())
-                      (initializations (progn
-                                         (next-char)
-                                         (read-c-statement
-                                          (next-char)))))
-                     (list* *variable-declarations*
-                            initializations
-                            (map 'list
-                                 #'parse-infix
-                                 (c-read-delimited-list #\( #\;))))
-              ,(read-block-or-statement)))))))
+	   `(vacietis.c:for
+	     ,(let* ((*local-var-types* (if *local-var-types*
+					    (copy-hash-table *local-var-types*)
+					    (make-hash-table)))
+		     (*variable-declarations* ()) ;; c99, I think?
+		     (*variable-lisp-type-declarations* ())
+		     (initializations (progn
+					(next-char)
+					(read-c-statement
+					 (next-char)))))
+		    (list* *variable-declarations*
+			   initializations
+			   (map 'list
+				#'parse-infix
+				(c-read-delimited-list #\( #\;))))
+	     ,(read-block-or-statement)))))))
 
 (defun read-function (name result-type)
   (let (arglist
@@ -1115,12 +1115,12 @@
         (prog1 ;t
 	    parameters
 	  #+nil
-	    (list arglist
-		  arglist-type-declarations
-		  local-arglist-declarations
-		  local-arglist-lisp-type-declarations
-		  *local-var-types*
-		  *local-variables*)
+	  (list arglist
+		arglist-type-declarations
+		local-arglist-declarations
+		local-arglist-lisp-type-declarations
+		*local-var-types*
+		*local-variables*)
 	  (c-read-char)) ;; forward declaration
         (let ((ftype `(ftype (function ,(make-list (length arglist) :initial-element '*) ,(lisp-type-for result-type)) ,name)))
           (when (find '&rest arglist)
@@ -1136,17 +1136,17 @@
              ,@(when *is-inline* (list `(declaim (inline ,name))))
              ,@(when ftype (list `(declaim ,ftype)))
              (vac-defun/1 ,name ,arglist
-               (declare ,@(remove-if #'null arglist-type-declarations))
-               ,(let* ((*variable-declarations* ())
-                       (*variable-lisp-type-declarations* ())
-                       (body (read-c-block (next-char))))
-                      `(prog* ,(append
-                                local-arglist-declarations
-                                (nreverse *variable-declarations*))
-                          (declare
-                           ,@(remove-if #'null local-arglist-lisp-type-declarations)
-                           ,@(remove-if #'null *variable-lisp-type-declarations*))
-                          ,@body))))))))
+			  (declare ,@(remove-if #'null arglist-type-declarations))
+			  ,(let* ((*variable-declarations* ())
+				  (*variable-lisp-type-declarations* ())
+				  (body (read-c-block (next-char))))
+				 `(prog* ,(append
+					   local-arglist-declarations
+					   (nreverse *variable-declarations*))
+				     (declare
+				      ,@(remove-if #'null local-arglist-lisp-type-declarations)
+				      ,@(remove-if #'null *variable-lisp-type-declarations*))
+				     ,@body))))))))
 
 (defun one-long-progn (body)
   (loop for x in body
@@ -1263,9 +1263,9 @@
 
 (defmacro evaluate-arithmetic-expression (expr)
   `(vac-arithmetic-expression-override
-     (let ((expanded-body (macroexpansion-of ,expr)))
-       ;;(dbg "expanded-body: ~S~%" expanded-body)
-       (eval expanded-body))))
+    (let ((expanded-body (macroexpansion-of ,expr)))
+      ;;(dbg "expanded-body: ~S~%" expanded-body)
+      (eval expanded-body))))
 
 (defun convert-to-alien-value-function (type)
   (let ((offset 0)
@@ -1333,13 +1333,13 @@
                 (dbg "  -> types: ~S~%" (get-alien-value-types element-type))
                 (let* ((loop-types types)
                        (elements
-                       (loop
-                          for value = (let ((type (car loop-types)))
-                                        (when (endp loop-types)
-                                          (setq loop-types types))
-                                        (next-value type))
-                          while value
-                          collect value)))
+			(loop
+			   for value = (let ((type (car loop-types)))
+					 (when (endp loop-types)
+					   (setq loop-types types))
+					 (next-value type))
+			   while value
+			   collect value)))
                   ;;(format t " -> elements: ~S~%" elements)
                   (setf (gethash alien-value-ctr *alien-value-table*) elements))))
             (multiple-value-bind (convert-one-form n-elements)
@@ -1374,7 +1374,7 @@
                     (,c-pointer (array-backed-c-pointer ,size)))
                (with-array-backed-c-pointers (,c-pointer)
                  (let ((,sap (c-pointer-sap ,c-pointer)))
-               ,(one-long-progn (set-alien-values type sap #'next-value #'next-offset))))
+		   ,(one-long-progn (set-alien-values type sap #'next-value #'next-offset))))
                ,c-pointer))))))
 
 (defun to-struct-value (type value)
@@ -1417,8 +1417,8 @@
   (dbg "get-dimensions name1: ~S~%" name1)
   (let ((dim1 (third name1)))
     (if (listp (second name1))
-      (nconc dimensions (get-dimensions (second name1)) (list dim1))
-      (nconc dimensions (list dim1)))))
+	(nconc dimensions (get-dimensions (second name1)) (list dim1))
+	(nconc dimensions (list dim1)))))
 
 (defun arithmetic-expression? (expr)
   (cond
@@ -1692,7 +1692,7 @@
       ;;(print next)
       (if (and name (eql #\( next))
           (let ((foo (read-function name type)))
-		 (list 'defun type name foo))
+	    (list 'defun type name foo))
           (read-variable-declarations spec-so-far base-type)))))
 
 (defun read-enum-decl ()
@@ -1744,9 +1744,9 @@
 	    (t
 					;	     (format t  "~&tok:~s" (car tokens))
 	     (car (remove 'vacietis.c:* tokens))))
- ;   #+nil
+					;   #+nil
     (let ((derefs (count 'vacietis.c:* tokens)))
-  ;    #+nil
+					;    #+nil
       (dotimes (x derefs)
 	(setf token (list :pointer token))))
     token
@@ -1757,19 +1757,27 @@
 (defun read-base-type (token)
   (dbg "read-base-type: ~S~%" token)
   (let ((tokens (list token))
-	(back-up nil))
+	(back-up nil)
+	(outchar nil))
     (loop while
-	 ;(type-qualifier? token)
+					;(type-qualifier? token)
 	 (not (let ((next-char (peek-char t %in)))
-;		(print next-char)
-		(or (char= #\( next-char)
-		    (char= #\; next-char)
-		    (char= #\{ next-char)))) ;;;went too far
+					;;;		(print next-char)
+		(flet ((test (char)
+			 (if (char= next-char char)
+			     (progn
+			       (setf outchar char)
+			       char)
+			     nil)))
+		  (or (test #\()
+		      (test #\;)
+		      (test #\{))))) ;;;went too far
        do
 	 (dbg "type qualifier token: ~S~%" token)
 	 (setf back-up (file-position %in))
 	 (setf token (next-exp))
 	 (push token tokens))
+    (format t "~&tokens ~s" tokens)
     (pop tokens)
     (map nil
 	 (lambda (token)
@@ -1783,24 +1791,24 @@
 	     (vacietis.c:unsigned
 	      (setq *is-unsigned* t))))
 	 tokens)
- ;;   (format t "~&tokens ~s" tokens)
     (file-position %in back-up)
     #+nil
     (awhen (gethash token (compiler-state-typedefs *compiler-state*))
       (setf token it))
     (cond ((eq token 'vacietis.c:enum)
 	   (let ((name (next-exp))
-;		 (huh (next-exp))
+					;		 (huh (next-exp))
 		 )
-;	     (print token)
-;	     (print name)
+					;	     (print token)
+					;	     (print name)
 	     (values
 	      name
 	      t
 	      'enum)
-;	     (values (make-enum-type :name huh) t)
+					;	     (values (make-enum-type :name huh) t)
 	     ))
-	  ((eq token 'vacietis.c:struct)
+	  ((find 'vacietis.c:struct tokens)
+					;	   (print "ADfasdafs")
 	   (dbg "  -> struct~%")
 	   (if (eql #\{ (peek-char t %in))
 	       (progn
@@ -1809,12 +1817,17 @@
 			 t
 			 'struct
 			 ))
-	       (let ((name (next-exp)))
-		 (dbg "  -> struct name: ~S~%" name)
-		 (values (or (gethash name (compiler-state-structs *compiler-state*))
-			     (make-struct-type :name name))
-			 t
-			 'struct))))
+	       (progn
+					;		 (print "ni")
+		 (let ((name (next-exp)))
+					;		   (print "234234")
+		   (dbg "  -> struct name: ~S~%" name)
+		   (values (or (gethash name (compiler-state-structs *compiler-state*))
+			       (make-struct-type :name name))
+			   (if (char= outchar #\;)
+			       nil
+			       t)
+			   'struct)))))
 	  (t
 	   (mehtype tokens)
 	   #+nil
@@ -1872,65 +1885,67 @@
   (let ((exp (make-buffer)))
     (vector-push-extend next-token exp)
     (loop for c = (next-char nil)
-          until (or (eql c #\;) (null c))
-          do (vector-push-extend (read-c-exp c) exp))
+       until (or (eql c #\;) (null c))
+       do (vector-push-extend (read-c-exp c) exp))
     (parse-infix exp)))
 
 
 (defun read-declaration (token)
   (cond
- ;   #+nil
+					;   #+nil
     ((eq 'vacietis.c:typedef token)
-	 (let* ((*is-unsigned* nil)
-		(*is-extern* nil)
-		(*is-const* nil)
-		(*is-unsigned* nil))
-;	   (print "yolo")
-	   (let ((next (next-exp)))
-;	     (print next)
-	     (multiple-value-bind  (base-type is-decl other-type)
-		 (read-base-type next)
-	       (declare (ignorable is-decl))
-;;	       (print "baggins")
+     (let* ((*is-unsigned* nil)
+	    (*is-extern* nil)
+	    (*is-const* nil)
+	    (*is-unsigned* nil))
+					;	   (print "yolo")
+       (let ((next (next-exp)))
+					;	     (print next)
+	 (multiple-value-bind  (base-type is-decl other-type)
+	     (read-base-type next)
+	   (declare (ignorable is-decl))
+	   ;;	       (print "baggins")
 	       ;;;read-typedef
-	       (dbg "read-typedef: ~S~%" base-type)
-	       (cond ((eq 'struct other-type) ;;;(struct-type-p base-type)
-		      (let ((names (read-struct base-type t)))
-			(dbg "typedef read-struct names: ~S~%" names)
-			#+nil
-			(dolist (name names)
-			  (when (symbolp name) ;; XXX handle pointer and array typedefs
-			    (setf (gethash name (compiler-state-typedefs *compiler-state*)) base-type)))
-			(list 'struct
-			      names
-			      base-type)
+	   (dbg "read-typedef: ~S~%" base-type)
+	   (cond ((eq 'struct other-type) ;;;(struct-type-p base-type)
+					;	      (print "23424")
+		  (let ((names (read-struct base-type t)))
+					;		(print "@#$@#$@#$@")
+		    (dbg "typedef read-struct names: ~S~%" names)
+		    #+nil
+		    (dolist (name names)
+		      (when (symbolp name) ;; XXX handle pointer and array typedefs
+			(setf (gethash name (compiler-state-typedefs *compiler-state*)) base-type)))
+		    (list 'struct
+			  names
+			  base-type)
 					;t
-			))
-		     ;;new
-		     ((eq 'enum other-type)
-		      (list
-		       'enum-???
-		       (c-read-delimited-list #\; #\,)
-		       base-type
-		       ))
-		     (t
-		      (let* ((token (next-exp))
+		    ))
+		 ;;new
+		 ((eq 'enum other-type)
+		  (list
+		   'enum-???
+		   (c-read-delimited-list #\; #\,)
+		   base-type
+		   ))
+		 (t
+		  (let* ((token (next-exp))
 					;(wot)
-			     )
-			(read-infix-exp token)
+			 )
+		    (read-infix-exp token)
 					;	   (print wot)
-			(list
-			 'typedef
-			 token
-			 base-type)
-			#+nil
-			(multiple-value-bind (name type)
-			    (process-variable-declaration wot base-type)
-			  (declare (ignorable name type))
-			  #+nil
-			  (setf (gethash name (compiler-state-typedefs *compiler-state*)) type)
+		    (list
+		     'typedef
+		     token
+		     base-type)
+		    #+nil
+		    (multiple-value-bind (name type)
+			(process-variable-declaration wot base-type)
+		      (declare (ignorable name type))
+		      #+nil
+		      (setf (gethash name (compiler-state-typedefs *compiler-state*)) type)
 					;t
-			  )))))))
+		      )))))))
      )
     (t ;(c-type? token)
      (let ((typedef?
@@ -1944,8 +1959,9 @@
 	      (if typedef?
 		  (next-exp)
 		  token))
+	   (print (list base-type is-decl other-type))
 	   (dbg "read-declaration base-type: ~S~%" base-type)
-	   ;;	     (format t "~&read-declaration base-type: ~S~% ~S~% ~S~%" base-type token is-decl)
+	   ;;	   (format t "~&read-declaration base-type: ~S~% ~S~% ~S~%" base-type token is-decl)
 	   (if (char= (peek-char nil %in) #\()
 	       (read-c-exp (next-char))
 	       (if is-decl
@@ -1967,7 +1983,7 @@
 			  (read-enum-decl)))
 		   (progn
 		     ;;		     (print "fuckme")
-;		     (print base-type)
+					;		     (print base-type)
 		     (read-var-or-function-declaration base-type))))))))))
 
 (defun read-labeled-statement (token)
@@ -1979,8 +1995,8 @@
   (let ((exp (make-buffer)))
     (vector-push-extend next-token exp)
     (loop for c = (next-char nil)
-          until (or (eql c #\;) (null c))
-          do (vector-push-extend (read-c-exp c) exp))
+       until (or (eql c #\;) (null c))
+       do (vector-push-extend (read-c-exp c) exp))
     (parse-infix exp)))
 
 (defun %read-c-statement (token)
@@ -1988,9 +2004,9 @@
     (if label
 	(values statement label)
 	(progn
-;	  (print "a fuck")
+					;	  (print "a fuck")
 	  (let ((foobar (read-declaration token)))
-;	    (print "fuck 7")
+					;	    (print "fuck 7")
 	    (if foobar
 		(if (eq t foobar)
 		    (values)
@@ -1999,15 +2015,15 @@
 		    (read-infix-exp token))))))))
 
 (defun read-c-statement (c)
-;  (print (file-position %in))
-;  (print c)
+					;  (print (file-position %in))
+					;  (print c)
   (case c
     (#\# (read-c-macro %in c))
     (#\; (values))
     (t
-;     (print "a")
+					;     (print "a")
      (let ((wot (read-c-exp c)))
-;       (print "b")
+					;       (print "b")
        (%read-c-statement wot)))))
 
 (defun read-c-identifier (c)
@@ -2067,7 +2083,7 @@
 	       #+nil
 	       (when (eq t symbol)
 		 (setq symbol '__c_t))
-;	       (print %in)
+					;	       (print %in)
 	       (acond
 		 #+nil
 		 ((gethash symbol (compiler-state-pp *compiler-state*))
@@ -2083,10 +2099,10 @@
 			%in
 			(make-concatenated-stream *macro-stream* %in))
 		  ;;(dbg "read-c-exp...~%")
-	;	  (print %in)
-	;	  (print (file-position %in))
+					;	  (print %in)
+					;	  (print (file-position %in))
 		  (let ((a-char (next-char)))
-	;	    (print a-char)
+					;	    (print a-char)
 		    (read-c-exp a-char)))
 		 #+nil
 		 ((gethash symbol (compiler-state-enums *compiler-state*))
@@ -2114,36 +2130,36 @@
         (list* 'progn
                exp1
                (loop while (peek-char t *macro-stream* nil)
-                     collect (read-c-statement (next-char))))
+		  collect (read-c-statement (next-char))))
         (or exp1 (values)))))
 
 (macrolet
     ((def-c-readtable ()
        `(defreadtable c-readtable
-         (:case :invert)
+	  (:case :invert)
 
-         ;; unary and prefix operators
-         ,@(loop for i in '(#\+ #\- #\~ #\! #\( #\& #\*)
-              collect `(:macro-char ,i 'read-c-toplevel nil))
+	  ;; unary and prefix operators
+	  ,@(loop for i in '(#\+ #\- #\~ #\! #\( #\& #\*)
+	       collect `(:macro-char ,i 'read-c-toplevel nil))
 
-         (:macro-char #\# 'read-c-macro nil)
+	  (:macro-char #\# 'read-c-macro nil)
 
-         (:macro-char #\/ 'read-c-comment nil)
+	  (:macro-char #\/ 'read-c-comment nil)
 
-         (:macro-char #\" 'read-c-string nil)
-         (:macro-char #\' 'read-character-constant nil)
+	  (:macro-char #\" 'read-c-string nil)
+	  (:macro-char #\' 'read-character-constant nil)
 
-         ;; numbers (should this be here?)
-         ,@(loop for i from 0 upto 9
-              collect `(:macro-char ,(digit-char i) 'read-c-toplevel nil))
+	  ;; numbers (should this be here?)
+	  ,@(loop for i from 0 upto 9
+	       collect `(:macro-char ,(digit-char i) 'read-c-toplevel nil))
 
-         ;; identifiers
-         (:macro-char #\_ 'read-c-toplevel nil)
-         ,@(loop for i from (char-code #\a) upto (char-code #\z)
-              collect `(:macro-char ,(code-char i) 'read-c-toplevel nil))
-         ,@(loop for i from (char-code #\A) upto (char-code #\Z)
-              collect `(:macro-char ,(code-char i) 'read-c-toplevel nil))
-         )))
+	  ;; identifiers
+	  (:macro-char #\_ 'read-c-toplevel nil)
+	  ,@(loop for i from (char-code #\a) upto (char-code #\z)
+	       collect `(:macro-char ,(code-char i) 'read-c-toplevel nil))
+	  ,@(loop for i from (char-code #\A) upto (char-code #\Z)
+	       collect `(:macro-char ,(code-char i) 'read-c-toplevel nil))
+	  )))
   (def-c-readtable))
 
 (defvar c-readtable (find-readtable 'c-readtable))
