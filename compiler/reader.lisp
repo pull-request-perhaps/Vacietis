@@ -1286,9 +1286,12 @@
           ,(one-long-progn (set-alien-values type 'sap #'next-value #'next-offset)))
        n-elements))))
 
+#+nil
 (defvar *alien-value-ctr* 0)
+#+nil
 (defvar *alien-value-table* (make-hash-table :weakness :value))
 
+#+nil
 (defun convert-to-alien-value (type value)
   (let* ((c-pointer (gensym))
          (sap (gensym))
@@ -1778,7 +1781,7 @@
 	 (setf back-up (file-position %in))
 	 (setf token (next-exp))
 	 (push token tokens))
-;    (format t "~&tokens ~s" tokens)
+;;    (format t "~&tokens ~s" tokens)
     (pop tokens)
     (map nil
 	 (lambda (token)
@@ -1803,7 +1806,7 @@
 					;	     (print token)
 					;	     (print name)
 	     (values
-	      name
+	      (list name tokens)
 	      t
 	      'enum)
 					;	     (values (make-enum-type :name huh) t)
@@ -1814,7 +1817,10 @@
 	   (if (eql #\{ (peek-char t %in))
 	       (progn
 		 (c-read-char)
-		 (values (read-struct-decl-body (make-struct-type))
+		 (values (list
+			  tokens
+			  (read-struct-decl-body; (make-struct-type)
+			   ))
 			 t
 			 'struct
 			 ))
@@ -1822,13 +1828,16 @@
 					;		 (print "ni")
 		 (let ((name (next-exp)))
 					;		   (print "234234")
+
 		   (dbg "  -> struct name: ~S~%" name)
-		   (values (or (gethash name (compiler-state-structs *compiler-state*))
-			       (make-struct-type :name name))
-			   (if (char= outchar #\;)
-			       nil
-			       t)
-			   'struct)))))
+		   (values
+		    #+nil
+		    (or (gethash name (compiler-state-structs *compiler-state*)))
+		    (list tokens name)
+		    (if (char= outchar #\;)
+			nil
+			t)
+		    'struct)))))
 	  (t
 	   (mehtype tokens)
 	   #+nil
@@ -1836,8 +1845,9 @@
 	    (read-error "Unexpected parser error: unknown type ~A" token)
 	    nil)))))
 
-(defun read-struct-decl-body (struct-type)
-  (declare (ignore struct-type))
+(defun read-struct-decl-body (;struct-type
+			      )
+ ; (declare (ignore struct-type))
 ;  (print 24234234234)
   (let (;(slot-index 0)
         (*in-struct* t)
@@ -1849,9 +1859,8 @@
 	     (let ((next (next-exp)))
 	       (let ((infix (read-infix-exp next)))
 		 (prog1 (push (list base-type infix) acc)
+		   #+nil
 		   (when next
-
-		     #+nil
 		     (multiple-value-bind (slot-name slot-type)
 			 (process-variable-declaration infix
 						       base-type)
@@ -1880,7 +1889,8 @@
 
 (defun read-struct (struct-type &optional for-typedef)
   (acase (next-char)
-    (#\{ (let ((body (read-struct-decl-body struct-type)))
+    (#\{ (let ((body (read-struct-decl-body; struct-type
+		      )))
 	   #+nil
 	   (awhen (struct-type-name struct-type)
 	     (setf (gethash it (compiler-state-structs *compiler-state*))
@@ -1927,17 +1937,17 @@
 	       ;;;read-typedef
 	   (dbg "read-typedef: ~S~%" base-type)
 	   (cond ((eq 'struct other-type) ;;;(struct-type-p base-type)
-					;	      (print "23424")
 		  (let ((names (read-struct base-type t)))
-					;		(print "@#$@#$@#$@")
+		   ;;;;(print "@#$@#$@#$@")
 		    (dbg "typedef read-struct names: ~S~%" names)
 		    #+nil
 		    (dolist (name names)
 		      (when (symbolp name) ;; XXX handle pointer and array typedefs
 			(setf (gethash name (compiler-state-typedefs *compiler-state*)) base-type)))
+		    #+nil
 		    (list 'struct
-			  names
-			  base-type)
+			  names)
+		    base-type
 					;t
 		    ))
 		 ;;new
@@ -2231,9 +2241,9 @@
 (defparameter *directory*
   (format nil
 	  "/home/imac/install/llvm/~A/src/include/llvm-c/"
-	  ;#+nil
-	  "3.8.0"
 	  #+nil
+	  "3.8.0"
+	  ;#+nil
 	  "6.0.0"
 	  ))
 (defparameter *directory-transforms*
