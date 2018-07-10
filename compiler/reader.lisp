@@ -367,7 +367,8 @@
                                         (pp-read-line)))))
               (include-file
                (slurp-while (lambda (c) (char/= c delimiter)))))
-	 (declare (ignore include-file))
+;	 (declare (ignore include-file))
+	 (format t "~&;;;include ~a~%" include-file)
          (next-char)
 	 #+nil
          (if (char= delimiter #\")
@@ -1275,8 +1276,19 @@
       (funcall *fun* x)))
 
 (defun should-dump (value)
-  (and (not (or (symbolp value)
-		(equal value '(nil))))))
+  (cond ((and (consp value)
+	      (or
+	       (consp (car value))
+	       (case (car value)
+		 ((defcfun defcstruct defctype defcenum) t))))
+	 (if (and (consp (car value))
+		  (eq :* (caar value)))
+	     (let ((name (second value)))
+	       (assert (symbolp name))
+	       (values (list 'defctype name :pointer)
+		       t))
+	     (values value t)))
+	(t (values nil nil))))
 
 (defun wow (*c-file* &optional (*compiler-state* (make-compiler-state)))
   (let ((*readtable*   c-readtable)
@@ -1302,18 +1314,19 @@
 		     (let ((*readtable* (find-readtable :standard))
 			   (*print-case* :downcase))
 		       (let ((value (treeify value)))
-			 (when (should-dump value)
-			   (format t
-				   "~&~s~%" value))))
+			 (multiple-value-bind (out p?) (should-dump value)
+			   (when p?
+			     (format t
+				     "~&~s~%" out)))))
 		     )))))))))
 
 (defparameter *directory*
   (format nil
 	  "/home/imac/install/llvm/~A/"
-					;#+nil
+
 	  "3.8.0/"
-	  #+nil
-	  "6.0.0/"
+	  
+	  ;"6.0.0/"
 	  ))
 (defparameter *directory-transforms*
   (merge-pathnames "Transforms/" *directory*))
@@ -1357,18 +1370,20 @@
        (write items :stream stream)))))
 
 (defun enum-dispatch (enum)
-  (cond ((and (eq 'vacietis.c:= (second enum)) ;;= x
-	      (integerp (third enum)))
-	 (list (first enum)
-	       (if (and (eq 'vacietis.c:<< (fourth enum));;= x << y
-			(integerp (fifth enum)))
-		   (ash (third enum)
-			(fifth enum))
-		   (third enum))))
-	(t
-	 (if (= 1 (length enum))
-	     (first enum)
-	     (error "enum screwed up: ~s" enum))))) ;;;;FIXME handle actual expressions
+  (when enum
+    (cond ((and (eq ':= (second enum)) ;;= x
+		;(integerp (third enum))
+		)
+	   (list (first enum)
+		 (if (and (eq ':<< (fourth enum));;= x << y
+			  (integerp (fifth enum)))
+		     (ash (third enum)
+			  (fifth enum))
+		     (third enum))))
+	  (t
+	   (if (= 1 (length enum))
+	       (first enum)
+	       (error "enum screwed up: ~s" enum)))))) ;;;;FIXME handle actual expressions
 
 (defpackage #:llvm)
 (defpackage #:lto)
