@@ -472,117 +472,133 @@
 (defvar *local-var-types*)
 (defvar *local-variables*)
 
-(defun read-function (name result-type)
-  (let (arglist
-        arglist-type-declarations
-        local-arglist-declarations
-        local-arglist-lisp-type-declarations
-        (*function-name* name)
-        (*local-var-types* (make-hash-table))
-        (*local-variables* (make-hash-table))
+(defun var-name (sequence)  
+  (elt sequence (1- (length sequence))))
 
-	(parameters (c-read-delimited-list (next-char) #\,)))
+(defun read-function (name result-type)
+  (declare (ignorable name result-type))
+  (let (;;arglist
+        ;;arglist-type-declarations
+	;;local-arglist-declarations
+	;;local-arglist-lisp-type-declarations
+	;;(*function-name* name)
+	;;(*local-var-types* (make-hash-table))
+	;;(*local-variables* (make-hash-table))
+
+	(parameters (c-read-delimited-list (next-char) #\,))
+	(buf (make-buffer)))
+    (map nil
+	 (lambda (x)
+	   (vector-push-extend
+	    (list (var-name x)
+		  (mehtype (coerce x 'list)))
+	    buf))
+	 parameters)
+    #+nil
+    parameters
+    #+nil
     (block done-arglist
       (loop for param across parameters do
-           (block done-arg
-             (let ((ptrlev 0)
-                   (arg-name)
-                   (arg-type
-                    (when (and (vectorp param) (c-type? (aref param 0)))
-                      (aref param 0))))
-               ;; XXX
-               (when (eq 'vacietis.c:const arg-type)
-                 (when (and (vectorp param) (c-type? (aref param 1)))
-                   (setq arg-type (aref param 1))))
-               (dbg "param: arg-type: ~S~%" arg-type)
-               (labels ((strip-type (x)
-                          (cond ((symbolp x)
-                                 (when (> ptrlev 0)
-                                   (let ((type arg-type))
-                                     (loop while (> ptrlev 0)
-                                        do (setq type (make-pointer-to :type type))
-                                          (decf ptrlev))
-                                     (setq arg-type type)))
-                                 (setq arg-name x)
-                                 (setf (gethash arg-name *local-var-types*) arg-type)
-                                 (setf (gethash arg-name *local-variables*)
-                                       (make-c-variable :name arg-name
-                                                        :parameter t
-                                                        :type arg-type))
-                                 (when *use-alien-types*
-                                   (cond
-                                     ((pointer-to-p arg-type)
-                                      (let ((passed-arg-name (intern (format nil "ARG-~A" (symbol-name arg-name))
-                                                                     #+nil
-                                                                     (symbol-package arg-name))))
-                                        (push `(,arg-name (vacietis::copy-c-pointer ,passed-arg-name))
-                                              local-arglist-declarations)
-                                        (push `(dynamic-extent ,arg-name)
-                                              local-arglist-lisp-type-declarations)
-                                        (push `(type vacietis::c-pointer ,arg-name)
-                                              local-arglist-lisp-type-declarations)
-                                        (setq arg-name passed-arg-name)))))
-                                 (push arg-name arglist))
-                                ((vectorp x)
-                                 (loop for x1 across x do
-                                      (when (not (or (c-type? x1)
-                                                     (eq 'vacietis.c:* x1)
-                                                     (eq 'vacietis.c:|,| x1)))
-                                        (strip-type x1))))
-                                (t
-                                 (read-error
-                                  "Junk in argument list: ~A" x)))))
-                 (when (and (vectorp param) (c-type? (aref param 0)))
-                   (dbg "  param: ~S~%" param)
-                   (when (and (= (length param) 3) (equalp #() (aref param 2)))
-                     (setq arg-type 'function-pointer))
-                   #+nil
-                   (push (lisp-type-declaration-for param)
-                         arglist-type-declarations))
-                 (loop for x across param do
-                      (cond
-                        ((eq x 'vacietis.c:|.|)
-                         (progn (push '&rest            arglist)
-                                (push 'vacietis.c:|...| arglist)
-                                (return-from done-arglist)))
-                        ((eq 'vacietis.c:* x)
-                         (incf ptrlev))
-                        ((and (listp x) (eq 'vacietis.c:[] (car x)))
-                         ;; dimensions are reversed here
-                         (setf arg-type
-                               (make-array-type
-                                :element-type arg-type
-                                :dimensions (awhen (cadr x)
-                                              (when (> (length it) 0)
-                                                (list (aref it 0))))))
-                         (dbg "  -> arg-type: ~S~%" arg-type)
-                         (setf (gethash arg-name *local-variables*)
-                               (make-c-variable :name arg-name
-                                                :parameter t
-                                                :type arg-type))
-                         (setf (gethash arg-name *local-var-types*) arg-type))
-                        ((not (or (c-type? x) (eq 'vacietis.c:* x)))
-                         (strip-type x))))
-                 ;; fix array dimensions
-                 (let* ((type arg-type)
-                        (dims))
-                   (loop
-                      while (array-type-p type)
-                      do (when (array-type-p type)
-                           (push (car (array-type-dimensions type)) dims)
-                           (setq type (array-type-element-type type))))
-                   (dbg "dims: ~S~%" dims)
-                   (setq type arg-type)
-                   (loop
-                      while (array-type-p type)
-                      do (when (array-type-p type)
-                           (setf (array-type-dimensions type) (list (pop dims)))
-                           (setq type (array-type-element-type type)))))
-                 (push (lisp-type-declaration-for arg-type arg-name)
-                       arglist-type-declarations))))))
+	   (block done-arg
+	     (let ((ptrlev 0)
+		   (arg-name)
+		   (arg-type
+		    (when (and (vectorp param) (c-type? (aref param 0)))
+		      (aref param 0))))
+	       ;; XXX
+	       (when (eq 'vacietis.c:const arg-type)
+		 (when (and (vectorp param) (c-type? (aref param 1)))
+		   (setq arg-type (aref param 1))))
+	       (dbg "param: arg-type: ~S~%" arg-type)
+	       (labels ((strip-type (x)
+			  (cond ((symbolp x)
+				 (when (> ptrlev 0)
+				   (let ((type arg-type))
+				     (loop while (> ptrlev 0)
+					do (setq type (make-pointer-to :type type))
+					  (decf ptrlev))
+				     (setq arg-type type)))
+				 (setq arg-name x)
+				 (setf (gethash arg-name *local-var-types*) arg-type)
+				 (setf (gethash arg-name *local-variables*)
+				       (make-c-variable :name arg-name
+							:parameter t
+							:type arg-type))
+				 (when *use-alien-types*
+				   (cond
+				     ((pointer-to-p arg-type)
+				      (let ((passed-arg-name (intern (format nil "ARG-~A" (symbol-name arg-name))
+								     #+nil
+								     (symbol-package arg-name))))
+					(push `(,arg-name (vacietis::copy-c-pointer ,passed-arg-name))
+					      local-arglist-declarations)
+					(push `(dynamic-extent ,arg-name)
+					      local-arglist-lisp-type-declarations)
+					(push `(type vacietis::c-pointer ,arg-name)
+					      local-arglist-lisp-type-declarations)
+					(setq arg-name passed-arg-name)))))
+				 (push arg-name arglist))
+				((vectorp x)
+				 (loop for x1 across x do
+				      (when (not (or (c-type? x1)
+						     (eq 'vacietis.c:* x1)
+						     (eq 'vacietis.c:|,| x1)))
+					(strip-type x1))))
+				(t
+				 (read-error
+				  "Junk in argument list: ~A" x)))))
+		 (when (and (vectorp param) (c-type? (aref param 0)))
+		   (dbg "  param: ~S~%" param)
+		   (when (and (= (length param) 3) (equalp #() (aref param 2)))
+		     (setq arg-type 'function-pointer))
+		   #+nil
+		   (push (lisp-type-declaration-for param)
+			 arglist-type-declarations))
+		 (loop for x across param do
+		      (cond
+			((eq x 'vacietis.c:|.|)
+			 (progn (push '&rest            arglist)
+				(push 'vacietis.c:|...| arglist)
+				(return-from done-arglist)))
+			((eq 'vacietis.c:* x)
+			 (incf ptrlev))
+			((and (listp x) (eq 'vacietis.c:[] (car x)))
+			 ;; dimensions are reversed here
+			 (setf arg-type
+			       (make-array-type
+				:element-type arg-type
+				:dimensions (awhen (cadr x)
+					      (when (> (length it) 0)
+						(list (aref it 0))))))
+			 (dbg "  -> arg-type: ~S~%" arg-type)
+			 (setf (gethash arg-name *local-variables*)
+			       (make-c-variable :name arg-name
+						:parameter t
+						:type arg-type))
+			 (setf (gethash arg-name *local-var-types*) arg-type))
+			((not (or (c-type? x) (eq 'vacietis.c:* x)))
+			 (strip-type x))))
+		 ;; fix array dimensions
+		 (let* ((type arg-type)
+			(dims))
+		   (loop
+		      while (array-type-p type)
+		      do (when (array-type-p type)
+			   (push (car (array-type-dimensions type)) dims)
+			   (setq type (array-type-element-type type))))
+		   (dbg "dims: ~S~%" dims)
+		   (setq type arg-type)
+		   (loop
+		      while (array-type-p type)
+		      do (when (array-type-p type)
+			   (setf (array-type-dimensions type) (list (pop dims)))
+			   (setq type (array-type-element-type type)))))
+		 (push (lisp-type-declaration-for arg-type arg-name)
+		       arglist-type-declarations))))))
+ 
     (if (eql (peek-char nil %in) #\;)
         (prog1 ;t
-	    parameters
+	    buf
 	  #+nil
 	  (list arglist
 		arglist-type-declarations
@@ -591,6 +607,8 @@
 		*local-var-types*
 		*local-variables*)
 	  (c-read-char)) ;; forward declaration
+	buf
+	#+nil
         (let ((ftype `(ftype (function ,(make-list (length arglist) :initial-element '*) ,(lisp-type-for result-type)) ,name)))
           (when (find '&rest arglist)
             (setq ftype nil))
@@ -696,6 +714,8 @@
                                (,defop ,varname
                                    ,varvalue))
                             decl-code))))))))
+    decls
+    #+nil
     (break "huh~a" decls)
  ;   (print decls)
     #+nil
@@ -731,7 +751,7 @@
       ;;(print next)
       (if (and name (eql #\( next))
           (let ((foo (read-function name type)))
-	    (list 'defcfun type name foo))
+	    (list* 'defcfun name type (coerce foo 'list)))
           (read-variable-declarations spec-so-far base-type)))))
 
 (defun read-enum-decl ()
@@ -933,21 +953,22 @@
 	   (awhen (struct-type-name struct-type)
 	     (setf (gethash it (compiler-state-structs *compiler-state*))
 		   struct-type))
-	   (list body
+	   (list 'defcstruct
 		 (let ((c (next-char)))
 		   (if (eql #\; c)
-		       t
+		       struct-type
+		       ;;t
 		       (progn (c-unread-char c)
 			      (if for-typedef
 				  (read-c-identifier-list c)
-				  (read-variable-declarations #() struct-type))))))))
+				  (read-variable-declarations #() struct-type)))))
+		 body)))
     (#\; t) ;; forward declaration
     (t   (if for-typedef
              (progn (c-unread-char it)
                     (read-c-identifier-list it))
              (read-variable-declarations (vector (read-c-exp it))
                                          struct-type)))))
-
 
 (defun read-declaration (token)
   (cond
@@ -982,11 +1003,14 @@
 		    ))
 		 ;;new
 		 ((eq 'enum other-type)
-		  (list
-		   'enum-???
-		   (c-read-delimited-list #\; #\,)
-		   base-type
-		   ))
+		  (let ((*fun* #'identity))
+		    (list*
+		     'defcenum
+		     (caar (treeify (c-read-delimited-list #\; #\,)))
+		     (mapcar #'enum-dispatch			     
+			     (treeify
+			      base-type))
+		     )))
 		 (t
 	;;	  (print "@@#${}$@}@#${")
 		  (let* ((token (next-exp))
@@ -1009,43 +1033,38 @@
 					;t
 		      ))))))))
     (t ;(c-type? token)
-     (let ((typedef?
-	    (eq 'vacietis.c:typedef token)))
-       (let* ((*is-inline* nil)
-	      (*is-extern* nil)
-	      (*is-const* nil)
-	      (*is-unsigned* nil))
-	 (multiple-value-bind (base-type is-decl other-type)
-	     (read-base-type
-	      (if typedef?
-		  (next-exp)
-		  token))
-;;	   (print (list base-type is-decl other-type))
-	   (dbg "read-declaration base-type: ~S~%" base-type)
-	   ;;	   (format t "~&read-declaration base-type: ~S~% ~S~% ~S~%" base-type token is-decl)
-	   (if (char= (peek-char nil %in) #\()
-	       (read-c-exp (next-char))
-	       (if is-decl
-		   (case other-type
-		     ((struct)
-		      (read-struct base-type typedef?))
-		     ((enum)
-		      (prog1
-			  (list 'enum base-type
-				(next-exp)
-					;(read-enum-decl)
-				)
-			(next-exp) ;;toss the semicolon ;
-			)))
-		   #+nil
-		   (cond ((struct-type-p base-type)
-			  (read-struct base-type))
-			 ((enum-type-p base-type)
-			  (read-enum-decl)))
-		   (progn
-		     ;;		     (print "fuckme")
+     (let* ((*is-inline* nil)
+	    (*is-extern* nil)
+	    (*is-const* nil)
+	    (*is-unsigned* nil))
+       (multiple-value-bind (base-type is-decl other-type)
+	   (read-base-type
+	    token)
+	 ;;	   (print (list base-type is-decl other-type))
+	 (dbg "read-declaration base-type: ~S~%" base-type)
+	 ;;	   (format t "~&read-declaration base-type: ~S~% ~S~% ~S~%" base-type token is-decl)
+	 (if (char= (peek-char nil %in) #\()
+	     (read-c-exp (next-char))
+	     (if is-decl
+		 (case other-type
+		   ((struct)
+		    (read-struct base-type nil))
+		   ((enum)
+		    (prog1
+			(list 'enum
+			      base-type
+			      (next-exp))
+		      (next-exp) ;;toss the semicolon ;
+		      )))
+		 #+nil
+		 (cond ((struct-type-p base-type)
+			(read-struct base-type))
+		       ((enum-type-p base-type)
+			(read-enum-decl)))
+		 (progn
+		   ;;		     (print "fuckme")
 					;		     (print base-type)
-		     (read-var-or-function-declaration base-type))))))))))
+		   (read-var-or-function-declaration base-type)))))))))
 
 (defun read-labeled-statement (token)
   (when (eql #\: (peek-char t %in))
@@ -1213,7 +1232,8 @@
 			 (if (and (symbolp x)
 				  (eq package
 				      (symbol-package x)))
-			     (symbol-name x)
+			     (intern (symbol-name x)
+				     :keyword)
 			     x))))
 	   (loop
 	      (let ((value (read stream nil eof)))
@@ -1221,7 +1241,7 @@
 		    (return)
 		    (let ((value (treeify value)))
 		      (format t
-			      "~&::~s~%" value))
+			      "~&~s~%" value))
 		    )))))))))
 
 (defparameter *directory*
@@ -1246,3 +1266,43 @@
 		     (dump file)))))
 	(stuff (uiop:directory-files c-include-files-dir))
 	(stuff (uiop:directory-files *directory-transforms*))))))
+
+(set-pprint-dispatch
+ '(cons (member defcfun))
+ (lambda (stream list)
+   (pprint-logical-block (stream list :prefix "(" :suffix ")")
+     (write (first list) :stream stream)
+     (write-char #\Space stream)
+     (write (second list) :stream stream)
+     (write-char #\Space stream)
+     (write (third list) :stream stream)
+     (pprint-indent :block 1 stream)
+     (dolist (items (cdddr list))
+       (pprint-newline :mandatory stream)
+       (write items :stream stream)))))
+
+(set-pprint-dispatch
+ '(cons (member defcenum))
+ (lambda (stream list)
+   (pprint-logical-block (stream list :prefix "(" :suffix ")")
+     (write (first list) :stream stream)
+     (write-char #\Space stream)
+     (write (second list) :stream stream)
+     (pprint-indent :block 1 stream)
+     (dolist (items (cddr list))
+       (pprint-newline :mandatory stream)
+       (write items :stream stream)))))
+
+(defun enum-dispatch (enum)
+  (cond ((and (eq 'vacietis.c:= (second enum)) ;;= x
+	      (integerp (third enum)))
+	 (list (first enum)
+	       (if (and (eq 'vacietis.c:<< (fourth enum));;= x << y
+			(integerp (fifth enum)))
+		   (ash (third enum)
+			(fifth enum))
+		   (third enum))))
+	(t
+	 (if (= 1 (length enum))
+	     (first enum)
+	     (error "enum screwed up: ~s" enum))))) ;;;;FIXME handle actual expressions
