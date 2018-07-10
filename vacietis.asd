@@ -13,10 +13,13 @@
             :components
             ((:file "package")
              (:file "state")
+	     #+nil
              (:file "libc-support")
              (:file "type")
+	     #+nil
              (:file "implementation" :depends-on ("type"))
              (:file "reader")
+	     #+nil
              (:file "vac" :depends-on ("reader"))))
    #+nil
    (:module :libc

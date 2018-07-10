@@ -425,17 +425,23 @@
   (or (type-qualifier?        identifier)
       (basic-type?            identifier)
       (unsigned-basic-type?   identifier)
+      #+nil
       (find identifier #(vacietis.c:struct vacietis.c:enum))
+      #+nil
       (gethash identifier (compiler-state-typedefs *compiler-state*))))
 
+#+nil
 (defvar *local-var-types* nil)
+#+nil
 (defvar *local-variables* nil)
 
+#+nil
 (defun size-of (x)
   (or (type-size x)
       (type-size (gethash x (or *local-var-types*
                                 (compiler-state-var-types *compiler-state*))))))
 
+#+nil
 (defun c-type-of (x)
   ;;(maphash #'(lambda (k v) (dbg "  func: ~S: ~S~%" k v)) (compiler-state-functions *compiler-state*))
   ;;(when *local-var-types* (maphash #'(lambda (k v) (dbg "  ~S: ~S~%" k v)) *local-var-types*))
@@ -450,6 +456,7 @@
           (when (gethash x (compiler-state-functions *compiler-state*))
             'function))))
 
+#+nil
 (defun array-type-of-exp (exp)
   (let ((type
          (if (listp exp)
@@ -473,6 +480,7 @@
              (c-type-of exp))))
     type))
 
+#+nil
 (defun c-type-of-exp (exp &optional base-type)
   ;;(when *local-var-types* (maphash #'(lambda (k v) (dbg "  ~S: ~S~%" k v)) *local-var-types*))
   ;;(maphash #'(lambda (k v) (dbg "  ~S: ~S~%" k v)) (compiler-state-var-types *compiler-state*))
@@ -553,6 +561,7 @@
     (dbg "c-type-of-exp ~S: ~S~%" exp type)
     type))
 
+#+nil
 (defun struct-name-of-type (type)
   (cond
     ((pointer-to-p type)
@@ -889,6 +898,7 @@
           list))
     list))
 
+#+nil
 (defun integer-type? (type)
   (member type
           '(vacietis.c:long vacietis.c:int vacietis.c:short vacietis.c:char
@@ -1131,6 +1141,7 @@
           (dbg "result type of ~S: ~S~%" name result-type)
           (dbg "ftype: ~S~%" ftype)
           (verbose "function ~S~%" ftype)
+	  #+nil
           (setf (gethash name (compiler-state-functions *compiler-state*))
                 (make-c-function :return-type result-type
                                  :inline *is-inline*))
@@ -1421,6 +1432,7 @@
                               (next-value type))
                             type))))))))
 
+#+nil
 (defun get-dimensions (name1 &optional dimensions)
   (dbg "get-dimensions name1: ~S~%" name1)
   (let ((dim1 (third name1)))
@@ -1428,6 +1440,7 @@
 	(nconc dimensions (get-dimensions (second name1)) (list dim1))
 	(nconc dimensions (list dim1)))))
 
+#+nil
 (defun arithmetic-expression? (expr)
   (cond
     ((or (numberp expr)
@@ -1441,6 +1454,7 @@
     (t
      nil)))
 
+#+nil
 (defun get-elements (base-type dimensions value)
   (if (= 1 (length dimensions))
       (map 'list #'(lambda (x)
@@ -1462,6 +1476,7 @@
                      (list* 'list (get-elements base-type (cdr dimensions) x)))
            (vector-literal-elements value))))
 
+#+nil
 (defun to-lisp-array (type base-type name1 value)
   (let* ((dimensions (get-dimensions name1))
          (lisp-element-type (lisp-type-for base-type))
@@ -1492,6 +1507,7 @@
                       dimensions))))))
 
 ;; for an array of struct typed objects
+#+nil
 (defun pass2-struct-array (type array)
   (loop for i from 0 upto (1- (length array)) do
        (let ((row (aref array i)))
@@ -1507,8 +1523,8 @@
                                        :element-type (lisp-type-for element-type)
                                        :initial-contents it))))))))))
 
-(defvar *in-struct* nil)
-
+;(defvar *in-struct* nil)
+#+nil
 (defun process-variable-declaration (spec base-type)
   (let (name (type base-type) initial-value init-size)
     (labels ((init-object (name1 value)
@@ -1700,7 +1716,7 @@
       ;;(print next)
       (if (and name (eql #\( next))
           (let ((foo (read-function name type)))
-	    (list 'defun type name foo))
+	    (list 'defcfun type name foo))
           (read-variable-declarations spec-so-far base-type)))))
 
 (defun read-enum-decl ()
@@ -1710,6 +1726,7 @@
       (let ((enums (c-read-delimited-list #\{ #\,)))
 	(setf ret enums)
 	;; fixme: assigned values to enum names
+	#+nil
 	(loop for name across enums for i from 0 do
 	     (setf (gethash (elt name 0) (compiler-state-enums *compiler-state*))
 		   i))))
@@ -1855,7 +1872,7 @@
  ; (declare (ignore struct-type))
 ;  (print 24234234234)
   (let (;(slot-index 0)
-        (*in-struct* t)
+   ;     (*in-struct* t)
 	acc)
     (loop for c = (next-char) until (eql #\} c) do
 ;	 (print c)
@@ -2236,34 +2253,44 @@
 (defun load-c-file (file)
   (%load-c-file file (make-compiler-state)))
 
-(defun wow (*c-file* &optional (*compiler-state* (make-compiler-state)))
+
+(defparameter *fun* (function identity))
+(defun treeify (x)
+  (if (typep x 'sequence)
+      (map 'list #'treeify
+	   x)
+      (funcall *fun* x)))
+
+
+(defun wow (*c-file* &optional (*compiler-state* (make-compiler-state))
+			)
   (let ((*readtable*   c-readtable)
         (*line-number* 1))
    (format t "~&~%~a~%~%" (pathname-name *c-file*))
-    (with-open-file (stream *c-file*)
-      (let ((%in stream))
-	(let ((eof (list nil)))
-	  (loop
-	     (let ((value		    
-;		    (next-exp)
-		     
-		     (read stream nil eof)
-		     ))
-	       (if (eq value eof)
-		   (return)
-		   (let ((value (treeify value)))
-		     (unless (symbolp value)
-		       (format t
-			       "~&::~s~%"
-			       #+nil
-			       "~&here::: 
-   ~s~&~%" value)))
-		   ))))))))
+   (with-open-file (stream *c-file*)
+     (let ((%in stream))
+       (let ((eof (list nil)))
+	 (let* ((package
+		 (find-package '"VACIETIS.C"))
+		(*fun* (lambda (x)
+			 (if (and (symbolp x)
+				  (eq package
+				      (symbol-package x)))
+			     (symbol-name x)
+			     x))))
+	   (loop
+	      (let ((value (read stream nil eof)))
+		(if (eq value eof)
+		    (return)
+		    (let ((value (treeify value)))
+		      (format t
+			      "~&::~s~%" value))
+		    )))))))))
 
 (defparameter *directory*
   (format nil
 	  "/home/imac/install/llvm/~A/"
-	  ;#+nil
+					;#+nil
 	  "3.8.0/"
 	  #+nil
 	  "6.0.0/"
@@ -2282,9 +2309,3 @@
 		     (dump file)))))
 	(stuff (uiop:directory-files c-include-files-dir))
 	(stuff (uiop:directory-files *directory-transforms*))))))
-
-(defun treeify (x)
-  (if (typep x 'sequence)
-      (map 'list #'treeify
-	   x)
-      x))
