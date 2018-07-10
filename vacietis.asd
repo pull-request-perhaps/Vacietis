@@ -44,4 +44,5 @@
             :components
             ((:file "program"))
             :depends-on (:compiler :libc)))
-  :depends-on (:named-readtables :anaphora :babel :cl-ppcre :cl-fad))
+  :depends-on (:named-readtables :anaphora :babel :cl-ppcre ;:cl-fad
+				 :stuff))

@@ -723,6 +723,27 @@
         (cons 'progn (nreverse decl-code))
         t)))
 
+(defun prefix? (prefix string)
+  (if (>= (length string)
+	  (length prefix))
+      (equal prefix
+	     (subseq string 0 (length prefix)))
+      nil))
+
+(defun send-to-package (name)
+  (let ((string (string name)))
+    (flet ((send (pack prefix-len)
+	     (let ((new (intern (stuff::c-lisp-name (subseq string prefix-len (length string)))
+			pack)))
+	       (export new
+		       pack)
+	       new)))
+      (cond ((prefix? "LLVM" string)
+	     (send :llvm 4))
+	    ((prefix? "LTO_" string)
+	     (send :lto 4))
+	    (t (intern name :vacietis))))))
+
 (defun read-var-or-function-declaration (base-type)
   "Reads a variable(s) or function declaration"
   (dbg "read-var-or-function-declaration: ~S~%" base-type)
@@ -751,7 +772,9 @@
       ;;(print next)
       (if (and name (eql #\( next))
           (let ((foo (read-function name type)))
-	    (list* 'defcfun name type (coerce foo 'list)))
+	    (list* 'defcfun (list (send-to-package name)
+				  (string name))
+		   type (coerce foo 'list)))
           (read-variable-declarations spec-so-far base-type)))))
 
 (defun read-enum-decl ()
@@ -1212,37 +1235,39 @@
 
 (defparameter *fun* (function identity))
 (defun treeify (x)
-  (if (typep x 'sequence)
+  (if (and (typep x 'sequence)
+	   (not (stringp x)))
       (map 'list #'treeify
 	   x)
       (funcall *fun* x)))
 
 
-(defun wow (*c-file* &optional (*compiler-state* (make-compiler-state))
-			)
+(defun wow (*c-file* &optional (*compiler-state* (make-compiler-state)))
   (let ((*readtable*   c-readtable)
         (*line-number* 1))
-   (format t "~&~%;;;;~a~%~%" (pathname-name *c-file*))
-   (with-open-file (stream *c-file*)
-     (let ((%in stream))
-       (let ((eof (list nil)))
-	 (let* ((package
-		 (find-package '"VACIETIS.C"))
-		(*fun* (lambda (x)
-			 (if (and (symbolp x)
-				  (eq package
-				      (symbol-package x)))
-			     (intern (symbol-name x)
-				     :keyword)
-			     x))))
-	   (loop
-	      (let ((value (read stream nil eof)))
-		(if (eq value eof)
-		    (return)
-		    (let ((value (treeify value)))
-		      (format t
-			      "~&~s~%" value))
-		    )))))))))
+    (format t "~&~%;;;;~a~%~%" (pathname-name *c-file*))
+    (with-open-file (stream *c-file*)
+      (let ((%in stream))
+	(let ((eof (list nil)))
+	  (let* ((package
+		  (find-package "VACIETIS.C"))
+		 (*fun* (lambda (x)
+			  (if (and (symbolp x)
+				   (eq package
+				       (symbol-package x)))
+			      (intern (symbol-name x)
+				      :keyword)
+			      x))))
+	    (loop
+	       (let ((value (read stream nil eof)))
+		 (if (eq value eof)
+		     (return)
+		     (let ((*readtable* (find-readtable :standard))
+			   (*print-case* :downcase))
+		       (let ((value (treeify value)))
+			 (format t
+				 "~&~s~%" value)))
+		     )))))))))
 
 (defparameter *directory*
   (format nil
@@ -1294,10 +1319,10 @@
        (write items :stream stream)))))
 
 (defun enum-dispatch (enum)
-  (cond ((and (eq 'vacietis.c:= (second enum)) ;;= x
+  (cond ((and (eq ':= (second enum)) ;;= x
 	      (integerp (third enum)))
 	 (list (first enum)
-	       (if (and (eq 'vacietis.c:<< (fourth enum));;= x << y
+	       (if (and (eq ':<< (fourth enum));;= x << y
 			(integerp (fifth enum)))
 		   (ash (third enum)
 			(fifth enum))
@@ -1306,3 +1331,6 @@
 	 (if (= 1 (length enum))
 	     (first enum)
 	     (error "enum screwed up: ~s" enum))))) ;;;;FIXME handle actual expressions
+
+(defpackage #:llvm)
+(defpackage #:lto)
