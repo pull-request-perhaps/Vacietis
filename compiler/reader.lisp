@@ -2213,6 +2213,7 @@
 (defun wow (*c-file* &optional (*compiler-state* (make-compiler-state)))
   (let ((*readtable*   c-readtable)
         (*line-number* 1))
+    (format t "~&~%~a~%~%" (pathname-name *c-file*))
     (with-open-file (stream *c-file*)
       (let ((eof (list nil)))
 	(loop
@@ -2228,7 +2229,13 @@
 		 )))))))
 
 (defparameter *directory*
-  "/home/imac/install/llvm/3.8.0/src/include/llvm-c/")
+  (format nil
+	  "/home/imac/install/llvm/~A/src/include/llvm-c/"
+	  ;#+nil
+	  "3.8.0"
+	  #+nil
+	  "6.0.0"
+	  ))
 (defparameter *directory-transforms*
   (merge-pathnames "Transforms/" *directory*))
 (defun wot (&optional (directory *directory*))
