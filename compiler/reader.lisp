@@ -696,7 +696,8 @@
                                (,defop ,varname
                                    ,varvalue))
                             decl-code))))))))
-    (print decls)
+    (break "huh~a" decls)
+ ;   (print decls)
     #+nil
     (if decl-code
         (cons 'progn (nreverse decl-code))
@@ -1070,6 +1071,8 @@
 					;	  (print "a fuck")
 	  (let ((foobar (read-declaration token)))
 					;	    (print "fuck 7")
+	    foobar
+	    #+nil
 	    (if foobar
 		(if (eq t foobar)
 		    (values)
