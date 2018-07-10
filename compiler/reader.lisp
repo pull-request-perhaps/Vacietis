@@ -997,6 +997,33 @@
              (read-variable-declarations (vector (read-c-exp it))
                                          struct-type)))))
 
+(defun defctype (token base-type)
+  (when (eq base-type 'vacietis.c:enum)
+    (setf base-type 'vacietis.c:int))
+  (when (eq base-type 'vacietis::bool)
+    (setf base-type 'vacietis.c:int))
+  (let ((ret
+	 (case token
+	   (vacietis.c:* nil)
+	   (otherwise
+	    (if (consp token)	 
+		(if (eq (car token)
+			'vacietis.c:*)
+		    (list
+		     'defctype
+		     (second token)
+		     :pointer)
+		    nil)
+		(list 'defctype
+		      token
+		      (if (consp base-type)
+			  :pointer
+			  base-type)))))))
+    ret
+					;   (print (list token base-type))
+					;   (break)
+    ))
+
 (defun read-declaration (token)
   (cond
 					;   #+nil
@@ -1043,14 +1070,14 @@
 		  (let* ((token (next-exp))
 			 )
 		    ;;;;;;;FIXME:: multiple typedef names
-;;		    (print (next-exp))
-;;		    (print 2342342)
-	;	    (read-infix-exp token)
+		    ;;		    (print (next-exp))
+		    ;;		    (print 2342342)
+					;	    (read-infix-exp token)
 					;	   (print wot)
-		    (list
-		     'typedef
-		     token
-		     base-type)
+		    (let ((*fun* #'identity))
+		      (defctype
+			  (treeify token)
+			  (treeify base-type)))
 		    #+nil
 		    (multiple-value-bind (name type)
 			(process-variable-declaration wot base-type)
@@ -1330,10 +1357,10 @@
        (write items :stream stream)))))
 
 (defun enum-dispatch (enum)
-  (cond ((and (eq ':= (second enum)) ;;= x
+  (cond ((and (eq 'vacietis.c:= (second enum)) ;;= x
 	      (integerp (third enum)))
 	 (list (first enum)
-	       (if (and (eq ':<< (fourth enum));;= x << y
+	       (if (and (eq 'vacietis.c:<< (fourth enum));;= x << y
 			(integerp (fifth enum)))
 		   (ash (third enum)
 			(fifth enum))
